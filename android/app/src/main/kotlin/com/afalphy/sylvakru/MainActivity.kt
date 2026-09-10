@@ -77,6 +77,7 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
         usbAudioChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getStatus" -> result.success(getStatus())
+                "prepareSharedFlacPlayback" -> prepareSharedFlacPlayback(call, result)
                 "applyPreferredOutput" -> result.success(applyPreferredOutput(call))
                 "clearPreferredOutput" -> result.success(clearPreferredOutput(call))
                 "probeExclusiveAccess" -> probeExclusiveAccess(result)
@@ -656,6 +657,33 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
             Log.w("MainActivity", "SuperLyric service is unavailable.", error)
             false
         }
+    }
+
+    private fun prepareSharedFlacPlayback(call: MethodCall, result: MethodChannel.Result) {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val bluetooth = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getActiveOutputDevice(audioManager)?.type in listOf(
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                AudioDeviceInfo.TYPE_BLE_HEADSET,
+                AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.isBluetoothA2dpOn
+        }
+        val playerHandle = call.argument<Number>("playerHandle")?.toLong() ?: 0L
+        val uri = call.argument<String>("uri")
+        if (!bluetooth || playerHandle == 0L || uri == null) {
+            result.success(false)
+            return
+        }
+        // FLAC 元数据可能包含大封面，探测放在后台，主线程只回传接入结果。
+        Thread({
+            val prepared = runCatching { UsbFlacNative.prepareSharedPlayback(playerHandle, uri) }
+                .onFailure { Log.w("SylvakruFlac", "Shared FLAC preparation failed", it) }
+                .getOrDefault(false)
+            runOnUiThread { result.success(prepared) }
+        }, "SylvakruFlacPrepare").start()
     }
 
     private fun getStatus(

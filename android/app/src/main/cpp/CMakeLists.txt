@@ -46,6 +46,7 @@ add_library(
     sylvakru_flac_decoder
     STATIC
     flac_decoder.cpp
+    flac_pcm_stream.cpp
 )
 target_include_directories(sylvakru_flac_decoder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(sylvakru_flac_decoder PUBLIC FLAC::FLAC)
@@ -131,6 +132,7 @@ if(ANDROID)
         sylvakru_usb_volume_protocol
         sylvakru_usb_pcm_packetizer
         ${log-lib}
+        ${CMAKE_DL_LIBS}
     )
 endif()
 

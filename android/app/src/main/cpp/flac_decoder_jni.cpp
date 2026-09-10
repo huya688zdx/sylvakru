@@ -1,11 +1,14 @@
 // UsbFlacNative 的 JNI 边界：把 FlacDecoder 以不透明句柄暴露给 Kotlin。
-// 句柄由 create/destroy 管理所有权，其余调用均假定单线程（USB 独占解码线程）使用。
+// USB 解码器由 create/destroy 单线程管理；普通播放的输入流由 mpv 回调管理。
 #include <jni.h>
+#include <android/log.h>
+#include <dlfcn.h>
 
 #include <cstdint>
 #include <string>
 
 #include "flac_decoder.h"
+#include "flac_pcm_stream.h"
 
 namespace {
 
@@ -158,4 +161,95 @@ Java_com_afalphy_sylvakru_UsbFlacNative_destroy(
     jobject,
     jlong handle) {
     delete fromHandle(handle);
+}
+
+namespace {
+
+// mpv stream_cb.h 的公开 ABI；通过已有 libmpv 动态符号注册，避免再链接一份播放器。
+// 字段顺序对应 https://github.com/mpv-player/mpv/blob/v0.41.0/include/mpv/stream_cb.h
+struct MpvStreamInfo {
+    void* cookie;
+    int64_t (*read_fn)(void*, char*, uint64_t);
+    int64_t (*seek_fn)(void*, int64_t);
+    int64_t (*size_fn)(void*);
+    void (*close_fn)(void*);
+    void (*cancel_fn)(void*);
+};
+
+constexpr const char* flac_protocol = "sylvakru-flac";
+
+std::string sharedFlacPath(const char* uri) {
+    const std::string prefix = std::string(flac_protocol) + "://";
+    const std::string value(uri);
+    if (value.compare(0, prefix.size(), prefix) != 0) return {};
+    std::string path;
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        return -1;
+    };
+    for (size_t index = prefix.size(); index < value.size(); ++index) {
+        char c = value[index];
+        if (c == '%') {
+            if (index + 2 >= value.size()) return {};
+            const int high = hex(value[index + 1]);
+            const int low = hex(value[index + 2]);
+            if (high < 0 || low < 0) return {};
+            c = static_cast<char>((high << 4) | low);
+            index += 2;
+        }
+        if (c == '\0') return {};
+        path += c;
+    }
+    return !path.empty() && path.front() == '/' ? path : std::string();
+}
+
+int openSharedFlac(void*, char* uri, MpvStreamInfo* info) {
+    auto* stream = new sylvakru::FlacPcmStream();
+    const auto opened = stream->open(sharedFlacPath(uri));
+    if (!opened.ok()) {
+        __android_log_print(ANDROID_LOG_WARN, "SylvakruFlac", "Open failed: %s", opened.message.c_str());
+        delete stream;
+        return -13; // MPV_ERROR_LOADING_FAILED
+    }
+    const auto& source = stream->streamInfo();
+    __android_log_print(ANDROID_LOG_INFO, "SylvakruFlac",
+        "Shared playback decoder=libFLAC source=%uHz/%ubit channels=%u",
+        source.sample_rate, source.valid_bits_per_sample, source.channels);
+    info->cookie = stream;
+    info->read_fn = [](void* cookie, char* buffer, uint64_t size) {
+        return static_cast<sylvakru::FlacPcmStream*>(cookie)->read(buffer, size);
+    };
+    info->seek_fn = [](void* cookie, int64_t offset) {
+        return static_cast<sylvakru::FlacPcmStream*>(cookie)->seek(offset);
+    };
+    info->size_fn = [](void* cookie) { return static_cast<sylvakru::FlacPcmStream*>(cookie)->size(); };
+    info->close_fn = [](void* cookie) { delete static_cast<sylvakru::FlacPcmStream*>(cookie); };
+    info->cancel_fn = [](void* cookie) { static_cast<sylvakru::FlacPcmStream*>(cookie)->cancel(); };
+    return 0;
+}
+
+}  // namespace
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_afalphy_sylvakru_UsbFlacNative_prepareSharedPlayback(
+    JNIEnv* env, jobject, jlong player_handle, jstring uri) {
+    if (player_handle == 0 || uri == nullptr) return JNI_FALSE;
+    const char* chars = env->GetStringUTFChars(uri, nullptr);
+    if (chars == nullptr) return JNI_FALSE;
+    const std::string path = sharedFlacPath(chars);
+    env->ReleaseStringUTFChars(uri, chars);
+    sylvakru::FlacPcmStream probe;
+    if (path.empty() || !probe.open(path).ok()) return JNI_FALSE;
+
+    // 库在播放器整个生命周期内保持加载，回调由 mpv 自己关闭和释放。
+    static void* mpv = dlopen("libmpv.so", RTLD_NOW | RTLD_LOCAL);
+    using RegisterStream = int (*)(void*, const char*, void*, decltype(&openSharedFlac));
+    static auto register_stream = mpv == nullptr ? nullptr :
+        reinterpret_cast<RegisterStream>(dlsym(mpv, "mpv_stream_cb_add_ro"));
+    if (register_stream == nullptr) return JNI_FALSE;
+    const int result = register_stream(reinterpret_cast<void*>(player_handle), flac_protocol, nullptr, openSharedFlac);
+    // 固定协议重复注册时 mpv 返回 INVALID_PARAMETER，既有回调仍然有效。
+    return result == 0 || result == -4 ? JNI_TRUE : JNI_FALSE;
 }

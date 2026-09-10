@@ -1,8 +1,10 @@
 #include "flac_decoder.h"
+#include "flac_pcm_stream.h"
 
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -147,6 +149,36 @@ void verifiesTruncatedFileFailsLoudly() {
     assert(!read.ok() || read.frames < 256);
 }
 
+void verifiesSharedPcmStream() {
+    sylvakru::FlacPcmStream stream;
+    assert(stream.open(testData("pcm24_stereo.flac")).ok());
+    std::vector<uint8_t> bytes;
+    char chunk[37];
+    int64_t count;
+    while ((count = stream.read(chunk, sizeof(chunk))) > 0) {
+        bytes.insert(bytes.end(), chunk, chunk + count);
+    }
+    assert(count == 0);
+    assert(stream.size() == 80 + 256 * 2 * 3);
+    assert(bytes.size() == static_cast<size_t>(stream.size()));
+    assert(std::memcmp(bytes.data(), "RF64", 4) == 0);
+    assert(std::memcmp(bytes.data() + 72, "data", 4) == 0);
+    assert(bytes[58] == 2 && bytes[68] == 6 && bytes[70] == 24);
+    const auto reference = readReference("pcm24_stereo.raw", 3);
+    for (size_t index = 0; index < reference.size(); ++index) {
+        assert(readSignedSample(bytes, 80 + index * 3, 3) == reference[index]);
+    }
+    // 定位到帧内字节，再回到文件头，验证 mpv 探测与拖动进度所需的字节定位。
+    assert(stream.seek(80 + 101 * 6 + 1) == 687);
+    assert(stream.read(chunk, sizeof(chunk)) == sizeof(chunk));
+    assert(std::memcmp(chunk, bytes.data() + 687, sizeof(chunk)) == 0);
+    assert(stream.seek(0) == 0);
+    assert(stream.read(chunk, sizeof(chunk)) == sizeof(chunk));
+    assert(std::memcmp(chunk, bytes.data(), sizeof(chunk)) == 0);
+    stream.cancel();
+    assert(stream.read(chunk, sizeof(chunk)) == -1);
+}
+
 }  // namespace
 
 int main() {
@@ -162,6 +194,8 @@ int main() {
     verifiesSeek();
     std::fprintf(stderr, "verifiesTruncatedFileFailsLoudly\n");
     verifiesTruncatedFileFailsLoudly();
+    std::fprintf(stderr, "verifiesSharedPcmStream\n");
+    verifiesSharedPcmStream();
     std::fprintf(stderr, "all tests passed\n");
     return 0;
 }

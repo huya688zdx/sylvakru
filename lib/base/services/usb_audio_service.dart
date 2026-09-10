@@ -69,6 +69,31 @@ class UsbAudioService {
     return _invokeStatus('getStatus');
   }
 
+  Future<String> prepareSharedFlacPlayback({
+    required int playerHandle,
+    required String path,
+    String? sourceFormat,
+  }) async {
+    if (!_isAndroid ||
+        !path.startsWith('/') ||
+        path.toLowerCase().endsWith('.part') ||
+        (sourceFormat?.toLowerCase() != 'flac' &&
+            !path.toLowerCase().endsWith('.flac'))) {
+      return path;
+    }
+    final uri = 'sylvakru-flac://${Uri.encodeComponent(path)}';
+    try {
+      final prepared = await _channel.invokeMethod<bool>(
+        'prepareSharedFlacPlayback',
+        {'playerHandle': playerHandle, 'uri': uri},
+      );
+      return prepared == true ? uri : path;
+    } on PlatformException catch (error) {
+      debugPrint('Shared FLAC preparation failed: ${error.message}');
+      return path;
+    }
+  }
+
   Future<UsbAudioStatus> applyPreferredOutput({
     int? deviceId,
     int? sampleRate,

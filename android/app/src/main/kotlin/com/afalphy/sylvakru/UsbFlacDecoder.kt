@@ -3,7 +3,7 @@ package com.afalphy.sylvakru
 import java.io.IOException
 import java.nio.ByteBuffer
 
-/** libFLAC 原生解码器的 JNI 入口；句柄由 [UsbFlacDecoder] 独占持有。 */
+/** libFLAC 的 USB 解码器 JNI 入口及普通播放输入注册。 */
 internal object UsbFlacNative {
     init {
         System.loadLibrary("sylvakru_usb_exclusive")
@@ -24,6 +24,8 @@ internal object UsbFlacNative {
     external fun seekToFrame(handle: Long, frame: Long): String?
 
     external fun destroy(handle: Long)
+
+    external fun prepareSharedPlayback(playerHandle: Long, uri: String): Boolean
 }
 
 /**

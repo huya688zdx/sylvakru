@@ -578,12 +578,16 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     MyAudioMetadata currentSong, {
     Duration? start,
   }) async {
+    final generation = _loadGeneration;
     final shouldPlay = isPlayingNotifier.value;
     if (currentSong.cacheExist) {
-      await _player.open(
-        Media(currentSong.cachePath!, start: start),
-        play: false,
+      final resource = await usbAudioService.prepareSharedFlacPlayback(
+        playerHandle: await _player.handle,
+        path: currentSong.cachePath!,
+        sourceFormat: currentSong.format,
       );
+      if (generation != _loadGeneration) return;
+      await _player.open(Media(resource, start: start), play: false);
       await _applySharedReplayGain(
         outputUserVolume(active: false, requested: volumeNotifier.value),
         establishBaseline: true,
@@ -610,6 +614,12 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         break;
     }
     resource ??= currentSong.path!;
+    resource = await usbAudioService.prepareSharedFlacPlayback(
+      playerHandle: await _player.handle,
+      path: resource,
+      sourceFormat: currentSong.format,
+    );
+    if (generation != _loadGeneration) return;
     await _player.open(
       Media(
         resource,
