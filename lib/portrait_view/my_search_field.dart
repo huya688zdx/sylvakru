@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
-import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/keyboard.dart';
 
 class MySearchField extends StatefulWidget {
@@ -11,17 +10,13 @@ class MySearchField extends StatefulWidget {
 
   final void Function()? onSearchTextChanged;
 
-  final MyAudioMetadata? song;
   final bool useCurrentSong;
-  final ValueNotifier<bool> isSearchNotifier;
 
   const MySearchField({
     super.key,
     required this.hintText,
     required this.textController,
-    required this.isSearchNotifier,
     this.onSearchTextChanged,
-    this.song,
     this.useCurrentSong = true,
   });
 
@@ -31,6 +26,7 @@ class MySearchField extends StatefulWidget {
 
 class _MySearchFieldState extends State<MySearchField> {
   final focusNode = FocusNode();
+  final isSearchNotifier = ValueNotifier(false);
 
   @override
   void initState() {
@@ -49,12 +45,12 @@ class _MySearchFieldState extends State<MySearchField> {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
-      valueListenable: widget.isSearchNotifier,
+      valueListenable: isSearchNotifier,
       builder: (context, value, child) {
         if (!value) {
           return IconButton(
             onPressed: () {
-              widget.isSearchNotifier.value = true;
+              isSearchNotifier.value = true;
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 focusNode.requestFocus();
               });
@@ -86,7 +82,7 @@ class _MySearchFieldState extends State<MySearchField> {
                       prefixIcon: Icon(Icons.search),
                       suffixIcon: IconButton(
                         onPressed: () {
-                          widget.isSearchNotifier.value = false;
+                          isSearchNotifier.value = false;
                           widget.textController.clear();
                           FocusScope.of(context).unfocus();
                           widget.onSearchTextChanged?.call();
@@ -98,8 +94,8 @@ class _MySearchFieldState extends State<MySearchField> {
                       fillColor: colorManager
                           .getSpecificMainPageSearchFieldColorForm(
                             widget.useCurrentSong
-                                ? currentSongNotifier.value
-                                : widget.song,
+                                ? currentSongNotifier.value?.picture
+                                : backgroundPicture,
                           ),
                       contentPadding: EdgeInsets.zero,
                       isDense: true,

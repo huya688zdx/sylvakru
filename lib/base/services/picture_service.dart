@@ -1,91 +1,136 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:audio_tags_lofty/audio_tags_lofty.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
-import 'package:sylvakru/base/my_audio_metadata.dart';
-import 'package:sylvakru/base/services/emby_client.dart';
-import 'package:sylvakru/base/services/navidrome_client.dart';
-import 'package:sylvakru/base/services/subsonic_client.dart';
-import 'package:sylvakru/base/services/webdav_client.dart';
+import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/picture_load_scheduler.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
+import 'package:sylvakru/base/services/webdav_client.dart';
 import 'package:sylvakru/base/utils/path.dart';
 
-Future<void> loadPictureSafe(MyAudioMetadata? song) async {
-  if (song == null || song.pictureLoaded) {
-    return;
+List<MyPicture> globalPictureList = [];
+
+class MyPicture {
+  String id;
+  bool isLoaded = false;
+  bool isExist = false;
+  String path = '';
+  Color? color;
+  Color? lowerLuminance;
+
+  final changeNotifier = ValueNotifier(0);
+
+  MyPicture(this.id, {String? md5Hash}) {
+    if (id.isEmpty) {
+      isExist = false;
+      isLoaded = true;
+      color = Colors.grey;
+      return;
+    }
+    md5Hash ??= md5.convert(utf8.encode(id)).toString();
+    path = '${getPicturesPath(sourceType)}/$md5Hash';
+    if (File(path).existsSync()) {
+      isLoaded = true;
+      isExist = true;
+    } else {
+      isExist = false;
+    }
   }
-  return pictureLoadScheduler.load(song.id, () => _loadPicture(song));
+
+  factory MyPicture.form(String id, {String? md5Hash}) {
+    final picture = MyPicture(id, md5Hash: md5Hash);
+    globalPictureList.add(picture);
+    return picture;
+  }
+
+  void reset() {
+    isLoaded = false;
+    isExist = false;
+    color = null;
+    lowerLuminance = null;
+    pictureLoadScheduler.resetPicture(this);
+  }
 }
 
-Future<void> _loadPicture(MyAudioMetadata song) async {
+Future<void> loadPictureSafe(MyPicture picture, {int? widgetId}) async {
+  if (picture.isLoaded) {
+    return;
+  }
+  return pictureLoadScheduler.load(
+    picture.id,
+    () => _loadPicture(picture),
+    widgetId,
+  );
+}
+
+Future<void> _loadPicture(MyPicture picture) async {
   try {
     Uint8List? bytes;
 
-    switch (song.sourceType) {
+    switch (sourceType) {
       case .local:
-        bytes = await readPictureAsync(song.path!);
+        bytes = await readPictureAsync(picture.id);
         break;
       case .webdav:
-        final tmpPath = await convertToRealPathIfNeed(song.path!);
+        final tmpPath = await covertToRedirectPathIfNeed(picture.id);
         if (tmpPath == null) {
           bytes = await readPictureAsync(
-            song.path!,
+            picture.id,
             headers: webdavClient?.headers,
           );
         } else {
           bytes = await readPictureAsync(tmpPath);
         }
         break;
-      case .subsonic:
-        bytes = await subsonicClient!.getPictureBytes(song.id);
-        break;
-      case .navidrome:
-        bytes = await navidromeClient!.getPictureBytes(song.id);
-        break;
       default:
-        bytes = await embyClient!.getPictureBytes(song.id);
+        bytes = await streamClient?.getPictureBytes(picture.id);
         break;
     }
 
     if (bytes != null) {
-      File pictureFile = File(song.picturePath);
+      File pictureFile = File(picture.path);
       if (!await pictureFile.exists()) {
         await pictureFile.create(recursive: true);
       }
       await pictureFile.writeAsBytes(bytes);
-      song.pictureExist = true;
+      picture.isExist = true;
     }
   } catch (e) {
     logger.output(e.toString());
   }
-  song.pictureLoaded = true;
+  picture.isLoaded = true;
 }
 
-Future<Color> computeCoverArtColor(MyAudioMetadata? song) async {
-  if (song?.coverArtColor != null) {
-    return song!.coverArtColor!;
+Future<Color> computeColor(MyPicture? picture) async {
+  if (picture?.color != null) {
+    return picture!.color!;
   }
   Uint8List? bytes;
-  await loadPictureSafe(song);
+  if (picture != null) {
+    await loadPictureSafe(picture);
+  }
 
-  if (song?.pictureExist == true) {
-    File pictureFile = File(song!.picturePath);
+  if (picture?.isExist == true) {
+    File pictureFile = File(picture!.path);
     if (await pictureFile.exists()) {
       bytes = await pictureFile.readAsBytes();
     }
   }
 
   if (bytes == null) {
-    song?.coverArtColor = Colors.grey;
+    picture?.color = Colors.grey;
     return Colors.grey;
   }
 
-  final color = await calculateAverageColor(bytes);
-  song!.coverArtColor = color;
+  final color = await _calculateAverageColor(bytes);
+  picture!.color = color;
 
   double r = color.r;
   double g = color.g;
@@ -97,7 +142,7 @@ Future<Color> computeCoverArtColor(MyAudioMetadata? song) async {
   if (luminance > maxLuminance) {
     final factor = maxLuminance / luminance;
 
-    song.lowerLuminance = Color.from(
+    picture.lowerLuminance = Color.from(
       alpha: color.a,
       red: r * factor,
       green: g * factor,
@@ -108,31 +153,39 @@ Future<Color> computeCoverArtColor(MyAudioMetadata? song) async {
   return color;
 }
 
-Future<Color> calculateAverageColor(Uint8List bytes) async {
+Future<Color> _calculateAverageColor(Uint8List bytes) async {
   final state = WidgetsBinding.instance.lifecycleState;
 
   if (Platform.isIOS && state != AppLifecycleState.resumed) {
     return _calculateWithImagePackage(bytes);
   }
 
-  final codec = await ui.instantiateImageCodec(
-    bytes,
-    targetWidth: 20,
-    targetHeight: 20,
-  );
+  Uint8List buffer = Uint8List(0);
+  ui.Codec? codec;
+  try {
+    codec = await ui.instantiateImageCodec(
+      bytes,
+      targetWidth: 20,
+      targetHeight: 20,
+    );
+    final frameInfo = await codec.getNextFrame();
+    final image = frameInfo.image;
 
-  final frameInfo = await codec.getNextFrame();
-  final image = frameInfo.image;
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
 
-  final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    image.dispose();
 
-  image.dispose();
+    if (byteData == null) {
+      return Colors.grey;
+    }
 
-  if (byteData == null) {
+    buffer = byteData.buffer.asUint8List();
+  } catch (e) {
+    logger.output(e.toString());
     return Colors.grey;
+  } finally {
+    codec?.dispose();
   }
-
-  final buffer = byteData.buffer.asUint8List();
 
   double r = 0;
   double g = 0;

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
@@ -62,7 +62,7 @@ class PlayBar extends StatelessWidget {
                   child: CoverArtWidget(
                     size: 35,
                     borderRadius: 3,
-                    song: currentSong,
+                    picture: currentSong.picture,
                   ),
                 ),
 
@@ -70,11 +70,13 @@ class PlayBar extends StatelessWidget {
                 Expanded(
                   child: TextScroll(
                     "${getTitle(currentSong)} - ${getArtist(currentSong)}",
-                    key: ValueKey(currentSong),
+                    key: ValueKey(
+                      currentSong.hashCode + MediaQuery.widthOf(context),
+                    ),
                     velocity: const Velocity(pixelsPerSecond: Offset(40, 0)),
                     style: TextStyle(fontSize: 16),
                     intervalSpaces: 10,
-                    pauseBetween: Duration(seconds: 1),
+                    pauseBetween: Duration(seconds: 2),
                   ),
                 ),
 

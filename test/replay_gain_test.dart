@@ -36,6 +36,7 @@ void main() {
         replayGainAlbumPeak: albumPeak,
       ),
       id: 'replay-gain-test',
+      path: 'replay-gain-test',
     );
   }
 
@@ -179,7 +180,11 @@ void main() {
   });
 
   test('关闭 ReplayGain 时忽略回退增益', () {
-    final result = replayGainFor(metadata(), ReplayGainMode.off, fallbackDb: -6);
+    final result = replayGainFor(
+      metadata(),
+      ReplayGainMode.off,
+      fallbackDb: -6,
+    );
 
     expect(result.gainDb, 0);
   });
@@ -373,10 +378,7 @@ void main() {
       establishBaseline: true,
     );
 
-    expect(
-      transition.appliedGain,
-      closeTo(0.4 * dbToLinear(-6), 0.000001),
-    );
+    expect(transition.appliedGain, closeTo(0.4 * dbToLinear(-6), 0.000001));
     expect(transition.adjustmentDb, closeTo(-6, 0.000001));
     expect(transition.needsRamp, isFalse);
   });

@@ -1,3 +1,7 @@
+# Sylvakru USB 独占维护版
+
+基于作者 4.1.0 版本同步维护。Sylvakru 支持 Android、iOS、Windows、Linux 和 macOS，音乐来源包括本地、WebDAV、Navidrome 和 Emby。本分支的 USB 独占功能用于 Android 外接 USB DAC。
+
 ## USB 独占播放功能介绍
 
 本分支基于原版 [AfalpHy/sylvakru](https://github.com/AfalpHy/sylvakru/tree/main) 进行二次开发，新增了一整套 **USB 独占直驱播放** 能力：绕开安卓混音器，将音频以位完美（bit-perfect）方式直接推送至外接 USB DAC，并围绕该功能补充了 DSD、云端流式播放、独占音量、状态显示与 DAC 适配诊断等配套能力。

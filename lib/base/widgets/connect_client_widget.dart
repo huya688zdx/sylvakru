@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/data/config.dart';
 import 'package:sylvakru/base/data/library.dart';
@@ -6,8 +6,9 @@ import 'package:sylvakru/base/data/loader.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/emby_client.dart';
 import 'package:sylvakru/base/services/interaction.dart';
+import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/navidrome_client.dart';
-import 'package:sylvakru/base/services/subsonic_client.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
 import 'package:sylvakru/base/utils/source_type.dart';
 import 'package:sylvakru/base/widgets/custom_text_field.dart';
@@ -17,6 +18,7 @@ class ConnectClientWidget extends StatefulWidget {
   final SourceType sourceType;
 
   const ConnectClientWidget({super.key, required this.sourceType});
+
   @override
   State<StatefulWidget> createState() => _ConnectClientWidgetState();
 }
@@ -33,18 +35,14 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
       baseUrlTmp.text = webdavClient?.baseUrl ?? '';
       usernameTmp.text = webdavClient?.username ?? '';
       passwordTmp.text = webdavClient?.password ?? '';
-    } else if (widget.sourceType == .subsonic) {
-      baseUrlTmp.text = subsonicClient?.baseUrl ?? '';
-      usernameTmp.text = subsonicClient?.username ?? '';
-      passwordTmp.text = subsonicClient?.password ?? '';
     } else if (widget.sourceType == .navidrome) {
-      baseUrlTmp.text = navidromeClient?.baseUrl ?? '';
-      usernameTmp.text = navidromeClient?.username ?? '';
-      passwordTmp.text = navidromeClient?.password ?? '';
+      baseUrlTmp.text = config.navidromeBaseUrl ?? '';
+      usernameTmp.text = config.navidromeUsername ?? '';
+      passwordTmp.text = config.navidromePassword ?? '';
     } else {
-      baseUrlTmp.text = embyClient?.baseUrl ?? '';
-      usernameTmp.text = embyClient?.username ?? '';
-      passwordTmp.text = embyClient?.password ?? '';
+      baseUrlTmp.text = config.embyBaseUrl ?? '';
+      usernameTmp.text = config.embyUsername ?? '';
+      passwordTmp.text = config.embyPassword ?? '';
     }
   }
 
@@ -62,18 +60,19 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
 
     return SizedBox(
       width: 300,
-      height: isMobile ? 345 : 320,
       child: Padding(
         padding: .fromLTRB(20, 15, 20, 15),
         child: Column(
           mainAxisAlignment: .center,
+          mainAxisSize: .min,
           children: [
-            SizedBox(
-              child: Text(
-                getSourceTypeName(l10n, widget.sourceType),
-                style: .new(fontWeight: .bold, fontSize: 18),
+            if (!firstLaunch)
+              SizedBox(
+                child: Text(
+                  getSourceTypeDisplayName(l10n, widget.sourceType),
+                  style: .new(fontWeight: .bold, fontSize: 18),
+                ),
               ),
-            ),
 
             SizedBox(height: 10),
             isTV
@@ -143,122 +142,150 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
         return Row(
           children: [
             Spacer(),
-            ElevatedButton(
-              onPressed: () async {
-                if (Loader.syncing) {
-                  showCenterMessage(context, l10n.syncingTryLater);
-                  return;
-                }
 
-                if (!await showConfirmDialog(context, l10n.clear)) {
-                  return;
-                }
-                if (widget.sourceType == .webdav) {
-                  await library.updateFolders([], false);
-                  webdavClient = null;
-                } else if (widget.sourceType == .subsonic) {
-                  subsonicClient = null;
-                } else if (widget.sourceType == .navidrome) {
-                  navidromeClient = null;
-                } else {
-                  embyClient = null;
-                }
-                if (context.mounted) {
-                  Navigator.pop(context);
-                }
-                await config.save();
-                await Loader.sync(getSourceTypeBitMask(widget.sourceType));
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: value),
-              child: Text(l10n.clear),
-            ),
+            if (!firstLaunch)
+              ElevatedButton(
+                onPressed: () => onDelete(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: firstLaunch ? null : value,
+                ),
+                child: Text(l10n.delete),
+              ),
 
-            SizedBox(width: 20),
+            if (!firstLaunch) SizedBox(width: 20),
 
-            ElevatedButton(
-              onPressed: () async {
-                if (Loader.syncing) {
-                  showCenterMessage(context, l10n.syncingTryLater);
-                  return;
-                }
-
-                if (widget.sourceType == .webdav) {
-                  final tmp = webdavClient;
-                  webdavClient = WebDavClient(
-                    baseUrl: baseUrlTmp.text,
-                    username: usernameTmp.text,
-                    password: passwordTmp.text,
-                  );
-                  if (!await webdavClient!.ping()) {
-                    if (context.mounted) {
-                      showCenterMessage(context, 'Can not connect to WebDAV');
-                    }
-                    webdavClient = tmp;
-                    return;
-                  }
-                } else if (widget.sourceType == .subsonic) {
-                  final tmp = subsonicClient;
-                  subsonicClient = SubsonicClient(
-                    baseUrl: baseUrlTmp.text,
-                    username: usernameTmp.text,
-                    password: passwordTmp.text,
-                  );
-                  if (!await subsonicClient!.ping()) {
-                    if (context.mounted) {
-                      showCenterMessage(context, 'Can not connect to Subsonic');
-                    }
-                    subsonicClient = tmp;
-                    return;
-                  }
-                } else if (widget.sourceType == .navidrome) {
-                  final tmp = navidromeClient;
-                  navidromeClient = NavidromeClient(
-                    baseUrl: baseUrlTmp.text,
-                    username: usernameTmp.text,
-                    password: passwordTmp.text,
-                  );
-                  if (!await navidromeClient!.ping()) {
-                    if (context.mounted) {
-                      showCenterMessage(
-                        context,
-                        'Can not connect to Navidrome',
-                      );
-                    }
-                    navidromeClient = tmp;
-                    return;
-                  }
-                } else {
-                  final tmp = embyClient;
-                  embyClient = EmbyClient(
-                    baseUrl: baseUrlTmp.text,
-                    username: usernameTmp.text,
-                    password: passwordTmp.text,
-                  );
-
-                  if (!await embyClient!.login()) {
-                    if (context.mounted) {
-                      showCenterMessage(context, 'Can not connect to Emby');
-                    }
-                    embyClient = tmp;
-                    return;
-                  }
-                }
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  showCenterMessage(context, 'Connected successfully');
-                }
-                await config.save();
-                if (widget.sourceType != .webdav) {
-                  await Loader.sync(getSourceTypeBitMask(widget.sourceType));
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: value),
-              child: Text(l10n.confirm),
-            ),
+            firstLaunch
+                ? Card(
+                    clipBehavior: .antiAlias,
+                    child: InkWell(
+                      mouseCursor: SystemMouseCursors.click,
+                      onTap: onSave,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 8,
+                        ),
+                        child: Text(l10n.save),
+                      ),
+                    ),
+                  )
+                : ElevatedButton(
+                    onPressed: () => onSave(),
+                    style: ElevatedButton.styleFrom(backgroundColor: value),
+                    child: Text(l10n.save),
+                  ),
             Spacer(),
           ],
         );
       },
     );
+  }
+
+  void onDelete() async {
+    if (!await showConfirmDialog(
+      context,
+      AppLocalizations.of(context).delete,
+    )) {
+      return;
+    }
+    if (widget.sourceType == .webdav) {
+      await library.updateFolders([]);
+      webdavClient = null;
+    } else if (widget.sourceType == .navidrome) {
+      config.navidromeBaseUrl = null;
+      config.navidromeUsername = null;
+      config.navidromePassword = null;
+      if (sourceType == widget.sourceType) {
+        streamClient = null;
+      }
+    } else {
+      config.embyBaseUrl = null;
+      config.embyUsername = null;
+      config.embyPassword = null;
+      if (sourceType == widget.sourceType) {
+        streamClient = null;
+      }
+    }
+    if (mounted) {
+      Navigator.pop(context);
+    }
+
+    await config.save();
+    if (widget.sourceType == sourceType) {
+      await Loader.sync();
+    }
+  }
+
+  void onSave() async {
+    try {
+      if (widget.sourceType == .webdav) {
+        final tmp = webdavClient;
+        webdavClient = WebDavClient(
+          baseUrl: baseUrlTmp.text,
+          username: usernameTmp.text,
+          password: passwordTmp.text,
+        );
+        if (!await webdavClient!.ping()) {
+          showCenterMessage('Can not connect to WebDAV');
+          webdavClient = tmp;
+          return;
+        }
+      } else if (widget.sourceType == .navidrome) {
+        final tmp = streamClient;
+        final navidromeClient = NavidromeClient(
+          baseUrl: baseUrlTmp.text,
+          username: usernameTmp.text,
+          password: passwordTmp.text,
+        );
+        if (!await navidromeClient.ping()) {
+          showCenterMessage('Can not connect to Navidrome');
+          streamClient = tmp;
+          return;
+        }
+        if (widget.sourceType == sourceType) {
+          streamClient = navidromeClient;
+        }
+        config.navidromeBaseUrl = baseUrlTmp.text;
+        config.navidromeUsername = usernameTmp.text;
+        config.navidromePassword = passwordTmp.text;
+      } else {
+        final tmp = streamClient;
+        final embyClient = EmbyClient(
+          baseUrl: baseUrlTmp.text,
+          username: usernameTmp.text,
+          password: passwordTmp.text,
+        );
+
+        if (!await embyClient.ping()) {
+          showCenterMessage('Can not connect to Emby');
+          streamClient = tmp;
+          return;
+        }
+        if (widget.sourceType == sourceType) {
+          streamClient = embyClient;
+        }
+        config.embyBaseUrl = baseUrlTmp.text;
+        config.embyUsername = usernameTmp.text;
+        config.embyPassword = passwordTmp.text;
+      }
+    } catch (e) {
+      if (context.mounted) {
+        showCenterMessage(e.toString(), duration: 5000);
+      }
+      logger.output(e.toString());
+      return;
+    }
+
+    if (!firstLaunch && mounted) {
+      Navigator.pop(context);
+    }
+    showCenterMessage('Save successfully');
+    await config.save();
+
+    if (!firstLaunch &&
+        widget.sourceType != .webdav &&
+        widget.sourceType == sourceType) {
+      await Loader.sync();
+    }
   }
 }

@@ -2,18 +2,21 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:http/http.dart' as http;
 import 'package:sylvakru/base/audio_handler.dart';
-import 'package:sylvakru/base/services/emby_client.dart';
+import 'package:sylvakru/base/data/config.dart';
+import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
+import 'package:sylvakru/base/services/emby_client.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/logger.dart';
-import 'package:sylvakru/base/services/subsonic_client.dart';
-import 'package:sylvakru/base/services/webdav_client.dart';
-import 'package:sylvakru/base/utils/format_duration.dart';
+import 'package:sylvakru/base/services/navidrome_client.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
+import 'package:sylvakru/base/services/system_ui_service.dart';
+import 'package:sylvakru/base/utils/common_utils.dart';
 import 'package:sylvakru/base/utils/media_query.dart';
 import 'package:sylvakru/base/utils/source_type.dart';
 import 'package:sylvakru/base/widgets/connect_client_widget.dart';
@@ -25,18 +28,31 @@ import 'package:sylvakru/base/widgets/manage_music_folders.dart';
 import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/data/loader.dart';
 import 'package:sylvakru/layer/premium_layer.dart';
+import 'package:sylvakru/portrait_view/portrait_view.dart';
 import 'package:sylvakru/portrait_view/sleep_timer.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/base/widgets/my_switch.dart';
-import 'package:sylvakru/base/services/navidrome_client.dart';
 import 'package:smooth_corner/smooth_corner.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class SettingsList extends StatelessWidget {
+class SettingsList extends StatefulWidget {
   final double? iconSize;
   final VoidCallback? onAudioOutputTap;
 
   const SettingsList({super.key, this.iconSize, this.onAudioOutputTap});
+
+  @override
+  State<StatefulWidget> createState() => _SettingsListState();
+}
+
+class _SettingsListState extends State<SettingsList> {
+  double? iconSize;
+
+  @override
+  void initState() {
+    super.initState();
+    iconSize = widget.iconSize;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -94,12 +110,20 @@ class SettingsList extends StatelessWidget {
           ),
 
         sliverBox(
-          paddingIfNeed(isLandscape, connect2ServerListTile(context, l10n)),
+          paddingIfNeed(isLandscape, switchSourceTypeListTile(context, l10n)),
         ),
 
         sliverBox(
-          paddingIfNeed(isLandscape, selectMusicFoldersListTile(context, l10n)),
+          paddingIfNeed(isLandscape, manageServersListTile(context, l10n)),
         ),
+
+        if (isNotStreamSource)
+          sliverBox(
+            paddingIfNeed(
+              isLandscape,
+              selectMusicFoldersListTile(context, l10n),
+            ),
+          ),
 
         sliverBox(paddingIfNeed(isLandscape, syncListTile(context, l10n))),
 
@@ -113,6 +137,11 @@ class SettingsList extends StatelessWidget {
 
         if (viewModeNotifier.value != .bigPicture)
           sliverBox(paddingIfNeed(isLandscape, fontListTile(context, l10n))),
+
+        if (Platform.isIOS &&
+            !isLandscape &&
+            viewModeNotifier.value != .bigPicture)
+          sliverBox(paddingIfNeed(isLandscape, drawerListTile(l10n))),
 
         if (isMobile && !isTV)
           sliverBox(paddingIfNeed(isLandscape, vibrationListTile(l10n))),
@@ -129,6 +158,10 @@ class SettingsList extends StatelessWidget {
 
         if (Platform.isAndroid)
           sliverBox(paddingIfNeed(isLandscape, audioOutputListTile(context))),
+        if (Platform.isAndroid && !isTV)
+          sliverBox(
+            paddingIfNeed(isLandscape, immersiveWideLayoutListTile(l10n)),
+          ),
 
         sliverBox(paddingIfNeed(isLandscape, autoPlayOnStartupListTile(l10n))),
 
@@ -188,119 +221,15 @@ class SettingsList extends StatelessWidget {
       leading: ImageIcon(reloadImage, size: iconSize),
       title: Text(l10n.syncLibrary),
       onTap: () async {
-        final sourceTypes = <SourceType>[];
-        if (library.localFolderList.isNotEmpty) {
-          sourceTypes.add(.local);
-        }
-        if (webdavClient != null) {
-          sourceTypes.add(.webdav);
-        }
-
-        if (subsonicClient != null) {
-          sourceTypes.add(.subsonic);
-        }
-
-        if (navidromeClient != null) {
-          sourceTypes.add(.navidrome);
-        }
-
-        if (embyClient != null) {
-          sourceTypes.add(.emby);
-        }
-
-        if (sourceTypes.isEmpty) {
-          return;
-        }
-
-        if (sourceTypes.length == 1) {
-          if (await showConfirmDialog(context, l10n.syncLibrary)) {
-            if (Loader.syncing) {
-              if (context.mounted) {
-                showCenterMessage(context, l10n.syncingTryLater);
-              }
-              return;
+        if (await showConfirmDialog(context, l10n.syncLibrary)) {
+          if (Loader.busy) {
+            if (context.mounted) {
+              showCenterMessage(l10n.syncingTryLater);
             }
-            await Loader.sync(getSourceTypeBitMask(sourceTypes.first));
+            return;
           }
-
-          return;
+          await Loader.sync();
         }
-
-        showAnimationDialog(
-          context: context,
-          child: SizedBox(
-            width: 300,
-            height: isMobile ? 300 : 280,
-            child: Padding(
-              padding: const EdgeInsets.all(15),
-              child: ListView(
-                children: [
-                  // get context
-                  Builder(
-                    builder: (context) {
-                      return ListTile(
-                        title: Text(l10n.all),
-                        onTap: () async {
-                          if (await showConfirmDialog(
-                            context,
-                            l10n.syncLibrary,
-                          )) {
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                            }
-                            if (Loader.syncing) {
-                              if (context.mounted) {
-                                showCenterMessage(
-                                  context,
-                                  l10n.syncingTryLater,
-                                );
-                              }
-                              return;
-                            }
-                            await Loader.sync(15);
-                          }
-                        },
-                      );
-                    },
-                  ),
-
-                  for (final sourceType in sourceTypes)
-                    Builder(
-                      builder: (context) {
-                        return ListTile(
-                          leading: Image(
-                            image: getSourceTypeImage(sourceType),
-                            width: 30,
-                            height: 30,
-                          ),
-                          title: Text(getSourceTypeName(l10n, sourceType)),
-                          onTap: () async {
-                            if (await showConfirmDialog(
-                              context,
-                              l10n.syncLibrary,
-                            )) {
-                              if (Loader.syncing) {
-                                if (context.mounted) {
-                                  showCenterMessage(
-                                    context,
-                                    l10n.syncingTryLater,
-                                  );
-                                }
-                                return;
-                              }
-                              await Loader.sync(
-                                getSourceTypeBitMask(sourceType),
-                              );
-                            }
-                          },
-                        );
-                      },
-                    ),
-                ],
-              ),
-            ),
-          ),
-        );
       },
     );
   }
@@ -344,16 +273,19 @@ class SettingsList extends StatelessWidget {
     );
   }
 
-  Widget connect2ServerListTile(BuildContext context, AppLocalizations l10n) {
+  Widget switchSourceTypeListTile(BuildContext context, AppLocalizations l10n) {
     return ListTile(
-      leading: ImageIcon(serverImage, size: iconSize),
-      title: Text(l10n.connect2Server),
+      leading: ImageIcon(optionImage, size: iconSize),
+      title: Text(l10n.switchSource),
       onTap: () {
+        if (Loader.busy) {
+          showCenterMessage(l10n.syncingTryLater);
+          return;
+        }
         showAnimationDialog(
           context: context,
           child: SizedBox(
             width: 300,
-            height: isMobile ? 255 : 225,
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: 10.0,
@@ -362,9 +294,107 @@ class SettingsList extends StatelessWidget {
               child: Builder(
                 builder: (context) {
                   return Column(
+                    mainAxisSize: .min,
                     children: [
+                      SizedBox(
+                        height: 35,
+                        child: Text(
+                          l10n.switchSource,
+                          style: .new(fontSize: 18, fontWeight: .bold),
+                        ),
+                      ),
+                      for (final tmp in SourceType.values)
+                        ListTile(
+                          leading: Image(
+                            image: getSourceTypeImage(tmp),
+                            width: 30,
+                            height: 30,
+                            color: tmp == .local || tmp == .webdav
+                                ? iconColor.value
+                                : null,
+                          ),
+
+                          title: Text(getSourceTypeDisplayName(l10n, tmp)),
+                          trailing: sourceType == tmp
+                              ? Icon(Icons.check)
+                              : null,
+                          onTap: () async {
+                            if (sourceType == tmp) {
+                              return;
+                            }
+                            if (!await showConfirmDialog(
+                              context,
+                              l10n.switchSource,
+                            )) {
+                              return;
+                            }
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                            }
+                            sourceType = tmp;
+                            isStreamSource =
+                                sourceType == .navidrome || sourceType == .emby;
+                            isNotStreamSource = !isStreamSource;
+                            streamClient = null;
+                            if (sourceType == .navidrome &&
+                                config.navidromeBaseUrl != null) {
+                              streamClient = NavidromeClient(
+                                baseUrl: config.navidromeBaseUrl!,
+                                username: config.navidromeUsername!,
+                                password: config.navidromePassword!,
+                              );
+                            } else if (sourceType == .emby &&
+                                config.embyBaseUrl != null) {
+                              streamClient = EmbyClient(
+                                baseUrl: config.embyBaseUrl!,
+                                username: config.embyUsername!,
+                                password: config.embyPassword!,
+                              );
+                            }
+                            setState(() {});
+
+                            Loader.reload();
+                            config.save();
+                          },
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget manageServersListTile(BuildContext context, AppLocalizations l10n) {
+    return ListTile(
+      leading: ImageIcon(serverImage, size: iconSize),
+      title: Text(l10n.manageServers),
+      onTap: () {
+        showAnimationDialog(
+          context: context,
+          child: SizedBox(
+            width: 300,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10.0,
+                vertical: 15,
+              ),
+              child: Builder(
+                builder: (context) {
+                  return Column(
+                    mainAxisSize: .min,
+                    children: [
+                      SizedBox(
+                        height: 35,
+                        child: Text(
+                          l10n.manageServers,
+                          style: .new(fontSize: 18, fontWeight: .bold),
+                        ),
+                      ),
                       webdavListTile(context, l10n),
-                      subsonicListTile(context, l10n),
                       navidromeListTile(context, l10n),
                       embyListTile(context, l10n),
                     ],
@@ -387,8 +417,12 @@ class SettingsList extends StatelessWidget {
         color: iconColor.value,
       ),
 
-      title: Text(l10n.connect2WebDAV),
+      title: Text(getSourceTypeDisplayName(l10n, .webdav)),
       onTap: () {
+        if (Loader.busy && sourceType == .webdav) {
+          showCenterMessage(l10n.syncingTryLater);
+          return;
+        }
         showAnimationDialog(
           context: context,
           child: ConnectClientWidget(sourceType: .webdav),
@@ -397,24 +431,15 @@ class SettingsList extends StatelessWidget {
     );
   }
 
-  Widget subsonicListTile(BuildContext context, AppLocalizations l10n) {
-    return ListTile(
-      leading: Image(image: subsonicImage, width: 30, height: 30),
-      title: Text(l10n.connect2Subsonic),
-      onTap: () {
-        showAnimationDialog(
-          context: context,
-          child: ConnectClientWidget(sourceType: .subsonic),
-        );
-      },
-    );
-  }
-
   Widget navidromeListTile(BuildContext context, AppLocalizations l10n) {
     return ListTile(
       leading: Image(image: navidromeImage, width: 30, height: 30),
-      title: Text(l10n.connect2Navidrome),
+      title: Text(getSourceTypeDisplayName(l10n, .navidrome)),
       onTap: () {
+        if (Loader.busy && sourceType == .navidrome) {
+          showCenterMessage(l10n.syncingTryLater);
+          return;
+        }
         showAnimationDialog(
           context: context,
           child: ConnectClientWidget(sourceType: .navidrome),
@@ -427,8 +452,12 @@ class SettingsList extends StatelessWidget {
     return ListTile(
       leading: Image(image: embyImage, width: 30, height: 30),
 
-      title: Text(l10n.connect2Emby),
+      title: Text(getSourceTypeDisplayName(l10n, .emby)),
       onTap: () {
+        if (Loader.busy && sourceType == .emby) {
+          showCenterMessage(l10n.syncingTryLater);
+          return;
+        }
         showAnimationDialog(
           context: context,
           child: ConnectClientWidget(sourceType: .emby),
@@ -442,14 +471,21 @@ class SettingsList extends StatelessWidget {
       leading: ImageIcon(cacheImage, size: iconSize),
       title: Text(l10n.clearCache),
       onTap: () async {
+        if (Loader.busy) {
+          showCenterMessage(l10n.syncLibrary);
+          return;
+        }
         if (await showConfirmDialog(context, l10n.clear)) {
-          for (final sourceType in SourceType.values) {
-            await library.clearCache(sourceType);
-          }
+          showCenterLoading();
+          layersManager.clearDataLayers();
+          await library.clearCache();
+          await library.clearPicture();
+          playlistManager.updateNotifier.value++;
+          removeCenterLoading();
         }
       },
       trailing: ValueListenableBuilder(
-        valueListenable: library.cacheSizeNotifier,
+        valueListenable: cacheSizeNotifier,
         builder: (context, value, child) {
           // use blank as placeholders
           return Text("${value.toStringAsFixed(1)}MB  ");
@@ -517,6 +553,25 @@ class SettingsList extends StatelessWidget {
     );
   }
 
+  Widget drawerListTile(AppLocalizations l10n) {
+    return ListTile(
+      leading: Transform.scale(
+        scale: 0.95,
+        child: Icon(Icons.menu_rounded, size: iconSize),
+      ),
+      title: Text(l10n.menuOnRight),
+      trailing: SizedBox(
+        width: 50,
+        child: MySwitch(
+          valueNotifier: endDrawerNotifier,
+          onToggleCallBack: () {
+            setting.save();
+          },
+        ),
+      ),
+    );
+  }
+
   Widget vibrationListTile(AppLocalizations l10n) {
     return ListTile(
       leading: ImageIcon(vibrationImage, size: iconSize),
@@ -541,8 +596,8 @@ class SettingsList extends StatelessWidget {
       subtitle: Text(l10n.audioOutputSubtitle),
       trailing: const Icon(Icons.chevron_right_rounded),
       onTap: () {
-        if (onAudioOutputTap != null) {
-          onAudioOutputTap!();
+        if (widget.onAudioOutputTap != null) {
+          widget.onAudioOutputTap!();
           return;
         }
         layersManager.pushDetail('settings', 'audio_output');
@@ -775,6 +830,37 @@ class SettingsList extends StatelessWidget {
     );
   }
 
+  Widget immersiveWideLayoutListTile(AppLocalizations l10n) {
+    return ListTile(
+      leading: Transform.scale(
+        scale: 0.9,
+        child: ImageIcon(fullscreenImage, size: iconSize),
+      ),
+
+      title: Text(l10n.immersiveWideLayout),
+      trailing: SizedBox(
+        width: 50,
+        child: Builder(
+          builder: (context) {
+            return MySwitch(
+              valueNotifier: immersiveWideLayoutNotifier,
+              onToggleCallBack: () {
+                if (!isTooNarrow(context)) {
+                  applySystemUiMode(
+                    mode: immersiveWideLayoutNotifier.value
+                        ? .immersiveSticky
+                        : .edgeToEdge,
+                  );
+                }
+                setting.save();
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget autoPlayOnStartupListTile(AppLocalizations l10n) {
     return ListTile(
       leading: ImageIcon(playOutlinedImage, size: iconSize),
@@ -816,25 +902,6 @@ class SettingsList extends StatelessWidget {
     );
   }
 
-  int _compareVersion(String a, String b) {
-    final aParts = a.split('.').map(int.parse).toList();
-    final bParts = b.split('.').map(int.parse).toList();
-
-    final length = aParts.length > bParts.length
-        ? aParts.length
-        : bParts.length;
-
-    for (int i = 0; i < length; i++) {
-      final aVal = i < aParts.length ? aParts[i] : 0;
-      final bVal = i < bParts.length ? bParts[i] : 0;
-
-      if (aVal != bVal) {
-        return aVal.compareTo(bVal);
-      }
-    }
-    return 0;
-  }
-
   Widget checkUpdate(BuildContext context, AppLocalizations l10n) {
     return ListTile(
       leading: ImageIcon(checkUpdateImage, size: iconSize),
@@ -851,7 +918,6 @@ class SettingsList extends StatelessWidget {
           if (response.statusCode != 200) {
             if (context.mounted) {
               showCenterMessage(
-                context,
                 'Failed to fetch GitHub release:${response.statusCode}',
               );
             }
@@ -862,7 +928,7 @@ class SettingsList extends StatelessWidget {
             'v',
             '',
           );
-          if (_compareVersion(latestVersion, versionNumber) > 0) {
+          if (compareVersion(latestVersion, versionNumber) > 0) {
             if (context.mounted) {
               showAnimationDialog(
                 context: context,
@@ -934,13 +1000,12 @@ class SettingsList extends StatelessWidget {
             }
           } else {
             if (context.mounted) {
-              showCenterMessage(context, l10n.alreadyLatest);
+              showCenterMessage(l10n.alreadyLatest);
             }
           }
         } catch (e) {
           if (context.mounted) {
             showCenterMessage(
-              context,
               'Failed to fetch GitHub release:$e',
               duration: 5000,
             );
@@ -958,59 +1023,62 @@ class SettingsList extends StatelessWidget {
       onTap: () async {
         showAnimationDialog(
           context: context,
-          child: SizedBox(
-            width: isTooNarrow(context) ? 300 : 400,
-            height: MediaQuery.heightOf(context) * 0.8,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: SelectableText(logger.logContent),
-                    ),
-                  ),
-                  SizedBox(height: 20),
-                  if (isMobile)
-                    ValueListenableBuilder(
-                      valueListenable: buttonColor.valueNotifier,
-                      builder: (context, value, child) {
-                        return ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: buttonColor.value,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            padding: EdgeInsets.all(10),
-                          ),
-                          onPressed: () async {
-                            String? result;
-                            if (Platform.isAndroid) {
-                              result = await FilePicker.getDirectoryPath();
-                              if (result == null) {
-                                return;
-                              }
-                              logger.export2Directory(result);
-                              if (context.mounted) {
-                                showCenterMessage(context, 'Export to $result');
-                              }
-                            } else {
-                              result = '${appDocsDir.path}/logs';
-                              logger.export2Directory(result);
-                              showCenterMessage(
-                                context,
-                                'Export to Sylvakru/logs',
-                              );
-                            }
+          child: Builder(
+            builder: (context) {
+              return ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.heightOf(context) * 0.75,
+                  maxWidth: isTooNarrow(context) ? 300 : 400,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(16),
+                          child: SelectableText(logger.logContent),
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      if (isMobile)
+                        ValueListenableBuilder(
+                          valueListenable: buttonColor.valueNotifier,
+                          builder: (context, value, child) {
+                            return ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: buttonColor.value,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                padding: EdgeInsets.all(10),
+                              ),
+                              onPressed: () async {
+                                String? result;
+                                if (Platform.isAndroid) {
+                                  result = await FilePicker.getDirectoryPath();
+                                  if (result == null) {
+                                    return;
+                                  }
+                                  logger.export2Directory(result);
+                                  if (context.mounted) {
+                                    showCenterMessage('Export to $result');
+                                  }
+                                } else {
+                                  result = '${appDocsDir.path}/logs';
+                                  logger.export2Directory(result);
+                                  showCenterMessage('Export to Sylvakru/logs');
+                                }
+                              },
+                              child: Text(l10n.exportLog),
+                            );
                           },
-                          child: Text(l10n.exportLog),
-                        );
-                      },
-                    ),
-                ],
-              ),
-            ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         );
       },

@@ -1,7 +1,6 @@
-import 'dart:math';
 import 'dart:ui';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:rive_animated_icon/rive_animated_icon.dart';
@@ -13,7 +12,8 @@ import 'package:sylvakru/base/data/artist_album.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
-import 'package:sylvakru/base/utils/format_duration.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/utils/common_utils.dart';
 import 'package:sylvakru/base/utils/media_query.dart';
 import 'package:sylvakru/base/utils/metadata_utils.dart';
 import 'package:sylvakru/base/utils/source_type.dart';
@@ -34,39 +34,48 @@ class BigSingleArtistPanel extends StatefulWidget {
 
 class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
   late final bool useCurrentSongForBgTmp;
-  late final MyAudioMetadata? backgroundSongTmp;
+  late final MyPicture? backgroundPictureTmp;
   final _scrollController = ScrollController();
 
-  SourceType get sourceType =>
-      widget.artist.songListManager.sourceTypeNotifier.value;
-
   void update() {
-    setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
   void initState() {
     useCurrentSongForBgTmp = useCurrentSongForBg;
-    backgroundSongTmp = backgroundSong;
+    backgroundPictureTmp = backgroundPicture;
     useCurrentSongForBg = true;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      colorManager.updateBigPictureRelatedColors(currentSongNotifier.value);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      colorManager.updateBigPictureRelatedColors(
+        currentSongNotifier.value?.picture,
+      );
+      if (isStreamSource) {
+        widget.artist.changeNotifier.addListener(update);
+        await widget.artist.load();
+      }
     });
-    widget.artist.songListManager.changeNotifier.addListener(update);
+
     super.initState();
   }
 
   @override
   void dispose() {
     useCurrentSongForBg = useCurrentSongForBgTmp;
+    if (isStreamSource) {
+      widget.artist.changeNotifier.removeListener(update);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       colorManager.updateBigPictureRelatedColors(
-        useCurrentSongForBg ? currentSongNotifier.value : backgroundSongTmp,
+        useCurrentSongForBg
+            ? currentSongNotifier.value?.picture
+            : backgroundPictureTmp,
       );
     });
     _scrollController.dispose();
-    widget.artist.songListManager.changeNotifier.removeListener(update);
     super.dispose();
   }
 
@@ -82,7 +91,10 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
           ValueListenableBuilder(
             valueListenable: currentSongNotifier,
             builder: (context, value, child) {
-              return CoverArtWidget(song: value, color: currentCoverArtColor);
+              return CoverArtWidget(
+                picture: value?.picture,
+                color: currentCoverArtColor,
+              );
             },
           ),
           ValueListenableBuilder(
@@ -132,29 +144,19 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
                         ),
                         IconButton(
                           onPressed: () async {
-                            audioHandler.currentIndex = Random().nextInt(
-                              widget.artist.songListManager
-                                  .getSongList()
-                                  .length,
-                            );
-                            playModeNotifier.value = 1;
                             await audioHandler.setPlayQueue(
-                              widget.artist.songListManager.getSongList(),
+                              widget.artist.songList,
+                              1,
                             );
-                            await audioHandler.load();
-                            audioHandler.play();
                           },
                           icon: ImageIcon(shuffleImage),
                         ),
                         IconButton(
                           onPressed: () async {
-                            audioHandler.currentIndex = 0;
-                            playModeNotifier.value = 0;
                             await audioHandler.setPlayQueue(
-                              widget.artist.songListManager.getSongList(),
+                              widget.artist.songList,
+                              0,
                             );
-                            await audioHandler.load();
-                            audioHandler.play();
                           },
                           icon: Icon(Icons.play_arrow_rounded),
                           iconSize: 30,
@@ -164,9 +166,13 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
                             Navigator.of(context).push(
                               ZoomPageRoute(
                                 builder: (_) => SelectableSongListPage(
-                                  songList: widget.artist.songListManager
-                                      .getSongList(),
+                                  songList: widget.artist.songList,
                                   reorderable: false,
+                                  isSelectedNotifierMap: Map.fromEntries(
+                                    widget.artist.songList.map(
+                                      (e) => MapEntry(e, ValueNotifier(false)),
+                                    ),
+                                  ),
                                 ),
                               ),
                             );
@@ -183,46 +189,8 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
                     Row(
                       children: [
                         Text(
-                          '${getSourceTypeName(l10n, widget.artist.songListManager.sourceTypeNotifier.value)}: ${widget.artist.albumList.where((album) => album.songListManager.getSongList2(sourceType).isNotEmpty).toList().length} ${l10n.albums}, ${l10n.songCount(widget.artist.songListManager.getSongList().length)}',
+                          '${getSourceTypeDisplayName(l10n, sourceType)}: ${widget.artist.albumList.length} ${l10n.albums}, ${l10n.songCount(widget.artist.songList.length)}',
                         ),
-                        if (widget.artist.songListManager.notEmptyCount >
-                            1) ...[
-                          SizedBox(width: 10),
-                          GlassContainer(
-                            settings: LiquidGlassSettings(
-                              glassColor: glassColor.value,
-                            ),
-                            child: Material(
-                              color: Colors.transparent,
-                              shape: SmoothRectangleBorder(
-                                smoothness: 1,
-                                borderRadius: .circular(5),
-                              ),
-                              clipBehavior: .antiAlias,
-                              child: InkWell(
-                                onTap: () {
-                                  showSwitchDialogIfNeed(
-                                    context,
-                                    widget.artist.songListManager,
-                                  );
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8.0,
-                                    vertical: 4.0,
-                                  ),
-                                  child: Text(
-                                    AppLocalizations.of(context).switch_,
-                                    style: .new(
-                                      color: textColor.value,
-                                      fontWeight: .bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                     SizedBox(height: 10),
@@ -280,10 +248,7 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
   }
 
   Widget albumContent(Album album, double panelWidth) {
-    final songList = album.songListManager
-        .getSongList2(sourceType)
-        .where((song) => getArtist(song).contains(widget.artist.name))
-        .toList();
+    final songList = album.songList;
     if (songList.isEmpty) {
       return SliverToBoxAdapter(child: SizedBox());
     }
@@ -293,7 +258,7 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
           SliverToBoxAdapter(
             child: Center(
               child: CoverArtWidget(
-                song: songList.first,
+                picture: album.picture,
                 size: panelWidth * 0.6,
                 borderRadius: panelWidth * 0.06,
               ),
@@ -319,7 +284,7 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
               maxExtent: panelWidth * 0.2,
               sliver: SliverToBoxAdapter(
                 child: CoverArtWidget(
-                  song: songList.first,
+                  picture: album.picture,
                   size: panelWidth * 0.2,
                   borderRadius: panelWidth * 0.01,
                 ),
@@ -369,25 +334,11 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
                   ),
                 ),
                 IconButton(
-                  onPressed: () async {
-                    audioHandler.currentIndex = Random().nextInt(
-                      songList.length,
-                    );
-                    playModeNotifier.value = 1;
-                    await audioHandler.setPlayQueue(songList);
-                    await audioHandler.load();
-                    audioHandler.play();
-                  },
+                  onPressed: () => audioHandler.setPlayQueue(songList, 1),
                   icon: ImageIcon(shuffleImage),
                 ),
                 IconButton(
-                  onPressed: () async {
-                    audioHandler.currentIndex = 0;
-                    playModeNotifier.value = 0;
-                    await audioHandler.setPlayQueue(songList);
-                    await audioHandler.load();
-                    audioHandler.play();
-                  },
+                  onPressed: () => audioHandler.setPlayQueue(songList, 0),
                   icon: Icon(Icons.play_arrow_rounded),
                   iconSize: 30,
                 ),
@@ -474,16 +425,22 @@ class _BigSingleArtistPanelState extends State<BigSingleArtistPanel> {
             builder: (context, currentSong, child) {
               return Center(
                 child: currentSong == song
-                    ? ValueListenableBuilder(
-                        valueListenable: isPlayingNotifier,
-                        builder: (context, value, child) {
+                    ? ListenableBuilder(
+                        listenable: Listenable.merge([
+                          isPlayingNotifier,
+                          iconColor.valueNotifier,
+                        ]),
+                        builder: (context, child) {
                           return RiveAnimatedIcon(
-                            key: ValueKey(value),
+                            key: ValueKey(
+                              isPlayingNotifier.value.toString() +
+                                  iconColor.value.toString(),
+                            ),
                             riveIcon: .sound,
                             width: 35,
                             height: 35,
-                            loopAnimation: value,
-                            enableAbsorbPointer: true,
+                            loopAnimation: isPlayingNotifier.value,
+                            color: iconColor.value,
                           );
                         },
                       )

@@ -1,92 +1,101 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/data/artist_album.dart';
 import 'package:sylvakru/base/data/loader.dart';
-import 'package:sylvakru/base/services/interaction.dart';
-import 'package:sylvakru/base/widgets/my_navigator.dart';
-import 'package:sylvakru/base/widgets/my_sheet.dart';
-import 'package:sylvakru/l10n/generated/app_localizations.dart';
-import 'package:sylvakru/landscape_view/title_bar.dart';
-import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/base/data/setting.dart';
-import 'package:sylvakru/base/services/color_manager.dart';
+import 'package:sylvakru/base/widgets/collection_list.dart';
+import 'package:sylvakru/l10n/generated/app_localizations.dart';
+import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/base/asset_images.dart';
-import 'package:sylvakru/base/widgets/cover_art_widget.dart';
-import 'package:sylvakru/base/widgets/my_divider.dart';
-import 'package:sylvakru/base/widgets/my_switch.dart';
-import 'package:sylvakru/portrait_view/custom_appbar_leading.dart';
-import 'package:sylvakru/portrait_view/my_search_field.dart';
-
-part '../landscape_view/panels/artists_panel.dart';
-part '../portrait_view/pages/artists_page.dart';
 
 final GlobalKey<NavigatorState> artistsKey = GlobalKey();
 final artistsVisibleNotifier = ValueNotifier(true);
 
-class ArtistsLayer extends StatefulWidget {
+class ArtistsLayer extends CollectionList {
   const ArtistsLayer({super.key});
 
   @override
   State<StatefulWidget> createState() => _ArtistsLayerState();
 }
 
-class _ArtistsLayerState extends State<ArtistsLayer> {
-  late final ValueNotifier<List<Artist>> currentArtistListNotifier;
+class _ArtistsLayerState extends CollectionListState {
+  @override
+  GlobalKey<NavigatorState> get globalKey => artistsKey;
 
-  final textController = TextEditingController();
+  @override
+  ValueNotifier<bool> get visibleNotifier => artistsVisibleNotifier;
 
-  final ScrollController scrollController = ScrollController();
+  @override
+  AssetImage get image => artistImage;
 
-  late ValueNotifier<bool> randomizeNotifier;
-  late ValueNotifier<bool> isAscendingNotifier;
-  late ValueNotifier<bool> useLargePictureNotifier;
+  @override
+  String Function(int) get countFunction =>
+      AppLocalizations.of(context).artistCount;
 
-  final ValueNotifier<bool> isSearchNotifier = ValueNotifier(false);
-
+  @override
   void updateCurrentList() {
+    preparing = false;
+
     final value = textController.text;
-    currentArtistListNotifier.value = artistAlbumManager.artistList
+    final list = artistAlbumManager.artistList
         .where((e) => (e.name.toLowerCase().contains(value.toLowerCase())))
         .toList();
-    if (randomizeNotifier.value) {
-      currentArtistListNotifier.value.shuffle();
+    if (randomizeNotifier!.value) {
+      list.shuffle();
     }
+    currentPictureList = list.map((e) => e.picture).toList();
+    currentTextList = list.map((e) => e.name).toList();
+    currentOnTapList = list
+        .map(
+          (e) => () {
+            if (e.picture.isLoaded) {
+              layersManager.pushDetail('artists', e);
+            }
+          },
+        )
+        .toList();
+
+    changeNotifier.value++;
   }
 
   @override
   void initState() {
     super.initState();
-    currentArtistListNotifier = ValueNotifier(
-      artistAlbumManager.artistList.cast<Artist>(),
-    );
 
-    randomizeNotifier = artistAlbumManager.getIsRandomizeNotifier(true);
-
+    randomizeNotifier = artistAlbumManager.getRandomizeNotifier(true);
     isAscendingNotifier = artistAlbumManager.getIsAscendingNotifier(true);
-
     useLargePictureNotifier = artistAlbumManager.getUseLargePictureNotifier(
       true,
     );
 
-    updateCurrentList();
-    textController.addListener(updateCurrentList);
+    isListViewNotifier = artistsIsListViewNotifier;
+
+    reachEnd = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (artistAlbumManager.artistList.isNotEmpty ||
+          (isNotStreamSource && !Loader.busy)) {
+        updateCurrentList();
+      } else if (isStreamSource) {
+        await artistAlbumManager.loadArtists();
+        updateCurrentList();
+      }
+    });
+
     artistAlbumManager.updateNotifier.addListener(updateCurrentList);
   }
 
   @override
   void dispose() {
-    textController.dispose();
     artistAlbumManager.updateNotifier.removeListener(updateCurrentList);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return myNavigator(
-      key: artistsKey,
-      visibleNotifier: artistsVisibleNotifier,
-      pageViewBuilder: () => pageView(context),
-      panelViewBuilder: () => panelView(context),
-    );
+    final l10n = AppLocalizations.of(context);
+    title = l10n.artists;
+    searchHint = l10n.searchArtists;
+    return super.build(context);
   }
 }

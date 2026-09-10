@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:smooth_corner/smooth_corner.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
@@ -30,7 +30,7 @@ class _PremiumLayerState extends State<PremiumLayer> {
     super.initState();
     _iapService.initialize();
     _iapService.onMessage = (msg, {duration}) {
-      showCenterMessage(context, msg, duration: duration ?? 3000);
+      showCenterMessage(msg, duration: duration ?? 3000);
     };
 
     WidgetsBinding.instance.addPostFrameCallback((_) {

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
@@ -45,6 +45,12 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
     immersiveModeTimer = Timer(const Duration(milliseconds: 5000), () {
       immersiveModeNotifier.value = true;
     });
+    final mediaQueryData = MediaQuery.of(context);
+    final pageWidth = mediaQueryData.size.width;
+    final pageHight =
+        mediaQueryData.size.height -
+        mediaQueryData.padding.top -
+        mediaQueryData.padding.bottom;
     return ValueListenableBuilder(
       valueListenable: immersiveModeNotifier,
       builder: (context, value, child) {
@@ -60,17 +66,16 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
           child: child,
         );
       },
-      child: content(),
+      child: immersiveWideLayoutNotifier.value
+          ? content(pageWidth, pageHight)
+          : SafeArea(child: content(pageWidth, pageHight)),
     );
   }
 
-  Widget content() {
+  Widget content(double pageWidth, double pageHight) {
     return ValueListenableBuilder(
       valueListenable: currentSongNotifier,
       builder: (context, currentSong, child) {
-        final pageWidth = MediaQuery.widthOf(context);
-        final pageHight = MediaQuery.heightOf(context);
-        // 封面适当缩小，为封面下方的输出状态胶囊腾出位置
         final coverArtSize = min(
           pageWidth * (isMobile ? 0.32 : 0.28),
           pageHight * (isMobile ? 0.6 : 0.55),
@@ -83,7 +88,7 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
             children: [
               if (lyricsPageThemeNotifier.value == .vivid) ...[
                 BlurredCoverArtWidget(
-                  song: currentSong,
+                  picture: currentSong?.picture,
                   color: colorManager.getSpecificLyricsPageCoverArtBaseColor(),
                   sigmaX: pageWidth * 0.03,
                   sigmaY: pageHight * 0.03,
@@ -129,7 +134,7 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
                             child: CoverArtWidget(
                               size: coverArtSize,
                               borderRadius: coverArtSize * 0.05,
-                              song: currentSong,
+                              picture: currentSong?.picture,
                               elevation: 15,
                               color: colorManager
                                   .getSpecificLyricsPageCoverArtBaseColor(),
@@ -166,52 +171,32 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
                       width: pageWidth * 0.45,
                       child: Column(
                         children: [
-                          SizedBox(height: isMobile ? 25 : 75),
-                          if (pageHight < 600)
+                          if (!isMobile) SizedBox(height: 75),
+
+                          if (pageHight < 600) ...[
+                            SizedBox(height: 15),
+
                             information(
                               pageWidth * 0.4,
                               pageHight,
                               currentSong,
                             ),
+                          ],
 
                           Expanded(
-                            child: ShaderMask(
-                              shaderCallback: (rect) {
-                                return LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.transparent, // fade out at top
-                                    Colors.black, // fully visible
-                                    Colors.black, // fully visible
-                                    Colors.transparent, // fade out at bottom
-                                  ],
-                                  stops: [
-                                    0.0,
-                                    0.05,
-                                    0.95,
-                                    1.0,
-                                  ], // adjust fade height
-                                ).createShader(rect);
-                              },
-                              blendMode: BlendMode.dstIn,
-                              // use key to force update
-                              child: ScrollConfiguration(
-                                behavior: ScrollConfiguration.of(
-                                  context,
-                                ).copyWith(scrollbars: false),
-                                child: currentSong == null
-                                    ? SizedBox()
-                                    : LyricsListView(
-                                        key: ValueKey(currentSong),
-                                        expanded: pageHight < 600
-                                            ? false
-                                            : true,
-                                        lines: currentSong.parsedLyrics!.lines,
-                                        isKaraoke:
-                                            currentSong.parsedLyrics!.isKaraoke,
-                                      ),
-                              ),
+                            child: ScrollConfiguration(
+                              behavior: ScrollConfiguration.of(
+                                context,
+                              ).copyWith(scrollbars: false),
+                              child: currentSong == null
+                                  ? SizedBox()
+                                  : LyricsListView(
+                                      key: ValueKey(currentSong),
+                                      expanded: pageHight < 600 ? false : true,
+                                      lines: currentSong.parsedLyrics!.lines,
+                                      isKaraoke:
+                                          currentSong.parsedLyrics!.isKaraoke,
+                                    ),
                             ),
                           ),
 
@@ -221,7 +206,7 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
                               pageHight,
                               currentSong,
                             ),
-                            SizedBox(height: 15),
+                            SizedBox(height: 10),
                           ],
                         ],
                       ),
@@ -313,7 +298,7 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
                   ),
                   velocity: const .new(pixelsPerSecond: .new(40, 0)),
                   intervalSpaces: 10,
-                  pauseBetween: Duration(seconds: 1),
+                  pauseBetween: Duration(seconds: 2),
                 );
               },
             ),
@@ -333,7 +318,7 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
                   style: TextStyle(fontSize: 14, color: value),
                   velocity: const .new(pixelsPerSecond: .new(40, 0)),
                   intervalSpaces: 10,
-                  pauseBetween: Duration(seconds: 1),
+                  pauseBetween: Duration(seconds: 2),
                 );
               },
             ),
@@ -399,10 +384,7 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
                       width: 40,
                       child: IconButton(
                         onPressed: () async {
-                          showCenterMessage(
-                            context,
-                            'Desktop lyrics has been removed',
-                          );
+                          showCenterMessage('Desktop lyrics has been removed');
                         },
                         icon: const ImageIcon(desktopLyricsImage, size: 25),
 

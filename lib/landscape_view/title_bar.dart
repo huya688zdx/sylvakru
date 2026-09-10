@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
@@ -216,16 +216,12 @@ class _TitleBarState extends State<TitleBar> {
               await Future.delayed(Duration(milliseconds: 250));
 
               colorManager.updateBigPictureRelatedColors(
-                currentSongNotifier.value,
+                currentSongNotifier.value?.picture,
               );
               viewModeNotifier.value = .bigPicture;
 
-              WidgetsBinding.instance.addPostFrameCallback((_) async {
-                layersManager.popDetail('artists');
-                layersManager.popDetail('albums');
-                layersManager.popDetail('folders');
-                layersManager.popDetail('playlists');
-                while (await layersManager.popDetail('settings')) {}
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                layersManager.clearAll();
               });
             },
             icon: ImageIcon(bigPictureModeImage),
@@ -355,6 +351,8 @@ class _TitleBarState extends State<TitleBar> {
                       layersManager.popDetail('artists');
                       layersManager.popDetail('albums');
                       layersManager.popDetail('folders');
+                      layersManager.popDetail('ranking');
+                      layersManager.popDetail('recently');
                       layersManager.popDetail('playlists');
                       while (await layersManager.popDetail('settings')) {}
                     },

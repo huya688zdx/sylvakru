@@ -1,7 +1,7 @@
 import 'dart:io';
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_gamepads/flutter_gamepads.dart';
 import 'package:liquid_glass_widgets/liquid_glass_setup.dart';
@@ -17,6 +17,7 @@ import 'package:sylvakru/base/widgets/usb_exclusive_volume_overlay.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/l10n/generated/app_localizations_en.dart';
 import 'package:sylvakru/base/data/loader.dart';
+import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/portrait_view/custom_page_transition_builder.dart';
 import 'package:sylvakru/view_entry.dart';
 import 'dart:async';
@@ -70,12 +71,14 @@ Future<void> main() async {
   await initAudioService();
 
   await Loader.init();
-  await Loader.load();
   await LiquidGlassWidgets.initialize();
   if (isTV) {
     FocusManager.instance.highlightStrategy =
         FocusHighlightStrategy.alwaysTraditional;
+  } else if (viewModeNotifier.value != .bigPicture && !firstLaunch) {
+    layersManager.switchRootLayer('songs');
   }
+
   runApp(
     ListenableBuilder(
       listenable: Listenable.merge([
@@ -85,11 +88,24 @@ Future<void> main() async {
         lightHoverFocusColorNotifier,
       ]),
       builder: (context, child) {
+        if (!immersiveWideLayoutNotifier.value) {
+          WidgetsBinding.instance.addPersistentFrameCallback((_) {
+            SystemChrome.setSystemUIOverlayStyle(
+              const SystemUiOverlayStyle(
+                statusBarIconBrightness: Brightness.light,
+              ),
+            );
+          });
+        }
         return MaterialApp(
           locale: localeNotifier.value,
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          title: 'Sylvaklu',
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalMaterialLocalizations.delegates,
+          ],
+          navigatorKey: globalNavigatorKey,
+          title: 'Sylvakru',
           theme: ThemeData(
             focusColor: lightHoverFocusColorNotifier.value
                 ? Colors.white.withAlpha(20)
@@ -250,8 +266,7 @@ Future<void> main() async {
                 context: context,
                 removeLeft: true, // for mobile
                 removeRight: true,
-                // semantics sometimes crash on ios simulator, I don't know why
-                child: ExcludeSemantics(child: ViewEntry()),
+                child: ViewEntry(),
               ),
             ),
           );
@@ -259,15 +274,8 @@ Future<void> main() async {
       ),
     ),
   );
-
   logger.output('App start');
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(
-      audioHandler.restoreCurrentSong().onError((error, stackTrace) {
-        logger.output('Playback restore failed: $error');
-      }),
-    );
-  });
+  await Loader.load();
 }
 
 Future<void> _setupWindow() async {

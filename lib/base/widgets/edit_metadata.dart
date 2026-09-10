@@ -4,10 +4,10 @@ import 'dart:typed_data';
 
 import 'package:audio_tags_lofty/audio_tags_lofty.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/data/library.dart';
-import 'package:sylvakru/base/services/metadata_service.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/logger.dart';
@@ -21,7 +21,6 @@ import 'package:sylvakru/base/widgets/custom_text_field.dart';
 import 'package:sylvakru/base/widgets/my_divider.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
-import 'package:sylvakru/base/utils/metadata_utils.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -62,7 +61,7 @@ class _EditMetadataState extends State<EditMetadata> {
     _trackTextController.text = song.track?.toString() ?? '';
     _discTextController.text = song.disc?.toString() ?? '';
     _lyricsTextController.text = song.lyrics ?? '';
-    _picturePathNotifier = ValueNotifier(song.picturePath);
+    _picturePathNotifier = ValueNotifier(song.picture.path);
   }
 
   @override
@@ -236,7 +235,7 @@ class _EditMetadataState extends State<EditMetadata> {
                   _picturePathNotifier.value = result.path;
                 },
                 child: CoverArtWidget(
-                  song: song,
+                  picture: song.picture,
                   picturePath: picturePath,
                   size: isPhone ? 150 : 180,
                   borderRadius: 10,
@@ -259,7 +258,7 @@ class _EditMetadataState extends State<EditMetadata> {
       if (Platform.isAndroid) {
         if (await Permission.manageExternalStorage.request() == .denied) {
           if (context.mounted) {
-            showCenterMessage(context, l10n.updateFailed);
+            showCenterMessage(l10n.updateFailed);
           }
           return;
         }
@@ -296,7 +295,7 @@ class _EditMetadataState extends State<EditMetadata> {
           disc: writeDisc,
           lyrics: writeLyrics,
           pictureBytes: writePictureBytes,
-          headers: song.sourceType == .webdav ? webdavClient?.headers : null,
+          headers: sourceType == .webdav ? webdavClient?.headers : null,
         );
       } catch (e) {
         logger.output(e.toString());
@@ -324,34 +323,29 @@ class _EditMetadataState extends State<EditMetadata> {
 
         await library.updateMetadata(song);
 
-        song.pictureLoaded = false;
-        song.pictureExist = false;
-        song.coverArtColor = null;
-        song.lowerLuminance = null;
+        song.picture.reset();
         // clear cache
         final imageCache = PaintingBinding.instance.imageCache;
         imageCache.clear();
         imageCache.clearLiveImages();
 
-        await computeCoverArtColor(song);
+        await computeColor(song.picture);
         if (song == currentSongNotifier.value) {
-          currentCoverArtColor = song.coverArtColor!;
+          currentCoverArtColor = song.picture.color!;
           contrastColorTheme = ContrastColorGenerator.generate(
             currentCoverArtColor,
           );
           colorManager.updateLyricsPageColors();
         }
-        final originArtist = getArtist(song);
-        final originAlbum = getAlbum(song);
-        artistAlbumManager.updateArtistAlbum(song, originArtist, originAlbum);
+        artistAlbumManager.updateArtistAlbum();
 
         song.updateNotifier.value++;
+        song.picture.changeNotifier.value++;
 
         layersManager.updateBackground();
       }
       if (context.mounted) {
         showCenterMessage(
-          context,
           success ? l10n.updateSuccessfully : l10n.updateFailed,
         );
         Navigator.pop(context);

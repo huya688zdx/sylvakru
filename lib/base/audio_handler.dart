@@ -3,13 +3,16 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:sylvakru/base/services/emby_client.dart';
-import 'package:sylvakru/base/services/metadata_service.dart';
+import 'package:sylvakru/base/data/loader.dart';
+import 'package:sylvakru/base/data/setting.dart';
+import 'package:sylvakru/base/services/my_window_listener.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
 import 'package:sylvakru/base/services/play_queue_logic.dart';
-import 'package:sylvakru/base/services/subsonic_client.dart';
 import 'package:sylvakru/base/services/super_lyric.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
+import 'package:sylvakru/base/services/taskbar_service.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
@@ -22,8 +25,9 @@ import 'package:sylvakru/base/data/history.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/base/utils/contrast_color_generator.dart';
 import 'package:sylvakru/base/data/library.dart';
+import 'package:sylvakru/base/data/database.dart';
+import 'package:sylvakru/base/extensions/metadata_extension.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
-import 'package:sylvakru/base/services/navidrome_client.dart';
 import 'package:sylvakru/base/services/replay_gain.dart';
 import 'package:sylvakru/base/services/usb_audio_preferences.dart';
 import 'package:sylvakru/base/services/usb_audio_service.dart';
@@ -37,6 +41,8 @@ late AudioSession _session;
 late MyAudioHandler audioHandler;
 
 List<MyAudioMetadata> playQueue = [];
+String? playQueueForStreamId;
+const String playQueueForStreamName = '_sylvakru_play_queue_';
 
 final ValueNotifier<MyAudioMetadata?> currentSongNotifier = ValueNotifier(null);
 final isPlayingNotifier = ValueNotifier(false);
@@ -162,6 +168,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   bool _intentionalExclusiveStop = false;
   bool _suppressPlayerCompleted = false;
   final _positionController = StreamController<Duration>.broadcast();
+  final _durationController = StreamController<Duration>.broadcast();
   ReplayGainResult _currentReplayGain = const ReplayGainResult(0, null, null);
   double _sharedUserVolume = 1;
   double _appliedUserVolume = volumeNotifier.value;
@@ -176,15 +183,14 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   int? _usbOutputHandoffGeneration;
   int _replayGainApplyGeneration = 0;
 
-  late final File _playQueueState;
-  late final File _playState;
-  late final File _equalizerState;
-  late final File _positionState;
+  File? _playQueueState;
+  late File _playState;
+  late File _equalizerState;
+  late File _positionState;
 
   Timer? _positionTimer;
 
   bool isLoading = false;
-  bool isSyncing = false;
   // load 的代次号：云端下载/权限弹窗等慢路径期间用户再切歌时，旧的 load 凭它自行作废
   int _loadGeneration = 0;
 
@@ -213,8 +219,9 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
 
         bool needPauseTmp = needPause;
 
-        while (isSyncing) {
-          await Future.delayed(Duration(milliseconds: 50));
+        if (Loader.busy) {
+          await pause();
+          return;
         }
         if (playModeNotifier.value == 2) {
           // repeat
@@ -233,7 +240,9 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       needPause = false;
       if (viewModeNotifier.value == .bigPicture) {
         if (useCurrentSongForBg) {
-          colorManager.updateBigPictureRelatedColors(currentSongNotifier.value);
+          colorManager.updateBigPictureRelatedColors(
+            currentSongNotifier.value?.picture,
+          );
         }
         return;
       }
@@ -245,13 +254,16 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       if (!_usbExclusiveActive) {
         _positionController.add(position);
       }
-      if (isLoading || isSyncing) {
+      if (isLoading || Loader.busy) {
         return;
       }
       if (!isPlayingNotifier.value) {
         return;
       }
       unawaited(_superLyric.publishAt(position));
+    });
+    _player.stream.duration.listen((duration) {
+      if (!_usbExclusiveActive) _durationController.add(duration);
     });
 
     usbExclusivePlaybackStateNotifier.addListener(_handleUsbExclusiveState);
@@ -276,9 +288,6 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         usbExclusiveDigitalVolumeGain(volumeNotifier.value),
       );
     });
-    library.replayGainMetadataChangedNotifier.addListener(
-      _handleReplayGainMetadataChanged,
-    );
     usbAudioPreferences.replayGainModeNotifier.addListener(
       _handleReplayGainModeChanged,
     );
@@ -417,6 +426,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     final next = volume.clamp(0.0, 1.0).toDouble();
     usbExclusiveVolumeNotifier.value = next;
     usbAudioPreferences.setVolumeForDevice(_usbVolumeDeviceKey, next);
+    setting.save();
   }
 
   void updateIsPlaying(bool isPlaying) {
@@ -428,6 +438,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
     needPause = false;
     isPlayingNotifier.value = isPlaying;
+    if (Platform.isWindows) {
+      if (!windowIsClosed) {
+        setupTaskbar();
+      }
+    }
   }
 
   void updatePlaybackState({Duration? postion, bool stop = false}) {
@@ -460,6 +475,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     );
     _usbExclusivePosition = interruptedPosition;
     _usbExclusiveActive = state.active;
+    _durationController.add(getCurrentDuration());
     if (wasActive && !state.active) {
       _cancelVolumeRamp();
       _cancelOutputGainRamp();
@@ -503,7 +519,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       // 对齐共享路径 completed 分支的语义：单曲循环重载当前曲、睡眠定时器播完暂停
       final needPauseTmp = needPause;
       unawaited(() async {
-        while (isSyncing) {
+        while (Loader.busy) {
           await Future.delayed(Duration(milliseconds: 50));
         }
         if (playModeNotifier.value == 2) {
@@ -577,23 +593,18 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
     String? resource;
     bool needHeader = false;
-    switch (currentSong.sourceType) {
+    switch (sourceType) {
       case .webdav:
-        final tmpPath = await convertToRealPathIfNeed(currentSong.path!);
+        final tmpPath = await covertToRedirectPathIfNeed(currentSong.path!);
         if (tmpPath == null) {
           needHeader = true;
         } else {
           resource = tmpPath;
         }
         break;
-      case .subsonic:
-        currentSong.path ??= subsonicClient!.getStreamUrl(currentSong.id);
-        break;
       case .navidrome:
-        currentSong.path ??= navidromeClient!.getStreamUrl(currentSong.id);
-        break;
       case .emby:
-        currentSong.path ??= embyClient!.audioUrl(currentSong.id);
+        resource = streamClient?.getStreamUrl(currentSong.id);
         break;
       default:
         break;
@@ -683,13 +694,35 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     );
   }
 
-  void initStateFiles() {
-    _playQueueState = File("${appSupportDir.path}/play_queue_state.json");
-    if (!(_playQueueState.existsSync())) {
-      _savePlayQueueState();
+  void _prepare() {
+    final sourceDir = Directory('${appSupportDir.path}/${sourceType.name}');
+    sourceDir.createSync(recursive: true);
+    for (final name in [
+      'play_state.json',
+      'position_state.json',
+      'play_queue_state.json',
+    ]) {
+      final target = File('${sourceDir.path}/$name');
+      final legacy = File('${appSupportDir.path}/$name');
+      if (!target.existsSync() && legacy.existsSync()) {
+        legacy.copySync(target.path);
+      }
     }
-    _playState = File("${appSupportDir.path}/play_state.json");
+    if (isNotStreamSource) {
+      _playQueueState = File(
+        "${appSupportDir.path}/${sourceType.name}/play_queue_state.json",
+      );
+      if (!(_playQueueState!.existsSync())) {
+        _playQueueState!.createSync(recursive: true);
+        _savePlayQueueState();
+      }
+    }
+
+    _playState = File(
+      "${appSupportDir.path}/${sourceType.name}/play_state.json",
+    );
     if (!(_playState.existsSync())) {
+      _playState.createSync(recursive: true);
       savePlayState();
     }
     _equalizerState = File("${appSupportDir.path}/equalizer_state.json");
@@ -697,8 +730,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       saveEqualizerState();
     }
 
-    _positionState = File("${appSupportDir.path}/position_state.json");
+    _positionState = File(
+      "${appSupportDir.path}/${sourceType.name}/position_state.json",
+    );
     if (!(_positionState.existsSync())) {
+      _positionState.createSync(recursive: true);
       _positionState.writeAsString(Duration.zero.inMilliseconds.toString());
     }
   }
@@ -715,59 +751,98 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   Future<void> loadStates() async {
-    await _loadPlayQueueState();
+    library.replayGainMetadataChangedNotifier.removeListener(
+      _handleReplayGainMetadataChanged,
+    );
+    library.replayGainMetadataChangedNotifier.addListener(
+      _handleReplayGainMetadataChanged,
+    );
+    _prepare();
     await _loadPlayState();
+    await _loadPlayQueueState();
     await _loadEqualizerState();
+    await _tryPlay();
   }
 
   Future<void> _loadPlayQueueState() async {
-    final content = await _playQueueState.readAsString();
+    if (isNotStreamSource) {
+      final content = await _playQueueState!.readAsString();
 
-    final json = jsonDecode(content) as Map<String, dynamic>;
+      final json = jsonDecode(content) as Map<String, dynamic>;
 
-    _playQueueTmp.addAll(_restoreQueue(json['playQueueTmp']));
-    playQueue.addAll(_restoreQueue(json['playQueue']));
-  }
-
-  void _savePlayQueueState() {
-    _playQueueState.writeAsStringSync(
-      jsonEncode({
-        'playQueueTmp': _playQueueTmp.map((e) => e.id).toList(),
-        'playQueue': playQueue.map((e) => e.id).toList(),
-      }),
-    );
-  }
-
-  Future<void> _loadPlayState() async {
-    final content = await _playState.readAsString();
-    final Map<String, dynamic> json =
-        jsonDecode(content) as Map<String, dynamic>;
-
-    if (json.containsKey('usbExclusiveDeviceVolumes')) {
-      usbAudioPreferences.loadDeviceVolumes(json['usbExclusiveDeviceVolumes']);
+      _playQueueTmp.addAll(_restoreQueue(json['playQueueTmp']));
+      playQueue.addAll(_restoreQueue(json['playQueue']));
+    } else {
+      playQueue.clear();
+      playQueueForStreamId = null;
+      playQueue = await streamClient?.getPlayQueue() ?? [];
+      // 首次升级时，把旧曲库中的队列迁到作者新版的云端队列。
+      final legacyQueue = File(
+        '${appSupportDir.path}/${sourceType.name}/play_queue_state.json',
+      );
+      final legacyDB = File(
+        '${appSupportDir.path}/${sourceType.name}/metadata.db',
+      );
+      if (playQueueForStreamId == null &&
+          legacyQueue.existsSync() &&
+          legacyDB.existsSync()) {
+        final saved = await readJsonMapFile(legacyQueue);
+        final ids = List<String>.from(saved['playQueue'] as List? ?? []);
+        if (ids.isNotEmpty) {
+          final db = MetadataDB(
+            openMetadataDB('${sourceType.name}/metadata.db'),
+          );
+          try {
+            final rows = await (db.select(
+              db.metadataItems,
+            )..where((row) => row.id.isIn(ids))).get();
+            for (final row in rows) {
+              library.id2Song.putIfAbsent(row.id, row.toMetadata);
+            }
+            playQueue = _restoreQueue(ids);
+          } finally {
+            await db.close();
+          }
+          if (playQueue.isNotEmpty && streamClient != null) {
+            playQueueForStreamId = await streamClient!.createPlaylist(
+              playQueueForStreamName,
+            );
+            if (playQueueForStreamId != null &&
+                await streamClient!.updatePlaylistSongs(
+                  playQueueForStreamId!,
+                  playQueue.map((song) => song.id).toList(),
+                )) {
+              await legacyQueue.writeAsString('{}');
+            }
+          }
+        }
+      }
+      if (playModeNotifier.value == 1) {
+        _playQueueTmp = List.from(playQueue);
+      }
     }
-    _handleUsbAudioStatus();
+  }
 
-    currentIndex = json['currentIndex'] as int? ?? -1;
-    playModeNotifier.value = json['playMode'] as int? ?? 0;
-    _tmpPlayMode = json['tmpPlayMode'] as int? ?? 0;
+  Future<void> _savePlayQueueState() async {
+    if (isNotStreamSource) {
+      _playQueueState!.writeAsStringSync(
+        jsonEncode({
+          'playQueueTmp': _playQueueTmp.map((e) => e.id).toList(),
+          'playQueue': playQueue.map((e) => e.id).toList(),
+        }),
+      );
+    } else {
+      await streamClient?.savePlayQueue(playQueue.map((e) => e.id).toList());
+    }
+  }
 
-    final restoredVolume = outputUserVolume(
-      active: false,
-      requested: (json['volume'] as double? ?? 1),
-    );
-    _sharedUserVolume = restoredVolume;
-    _appliedUserVolume = restoredVolume;
-    _volumeRampTarget = restoredVolume;
-    volumeNotifier.value = restoredVolume;
-    _applyUserVolume(restoredVolume);
-
+  Future<void> _tryPlay() async {
     if (!_started) {
       _started = true;
       if (autoPlayOnStartupNotifier.value) {
         if (playQueue.isEmpty) {
           currentIndex = 0;
-          playQueue = List.from(library.songListManager.getSongList());
+          playQueue = List.from(library.songList);
         }
         if (playQueue.isNotEmpty) {
           isPlayingNotifier.value = true;
@@ -777,25 +852,43 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       }
     }
 
-    currentIndex = restoredPlaybackIndex(currentIndex, playQueue.length) ?? -1;
+    if (playQueue.isNotEmpty) {
+      // reload may make some songs not in the library to be removed
+      if (currentIndex == -1 || currentIndex >= playQueue.length) {
+        currentIndex = 0;
+      }
+
+      final positionMs = await _positionState.readAsString();
+
+      await load(start: Duration(milliseconds: int.tryParse(positionMs) ?? 0));
+
+      if (isPlayingNotifier.value) {
+        _startPositionTimer();
+      }
+    }
   }
 
-  Future<void> restoreCurrentSong() async {
-    final restored = restoredPlaybackIndex(currentIndex, playQueue.length);
-    if (restored == null) {
-      return;
-    }
-    currentIndex = restored;
-    // 上游“记住播放位置”：从上次退出保存的位置继续（保持我们的延迟恢复流程）
-    final positionMs = await _positionState.readAsString();
-    await load(start: Duration(milliseconds: int.tryParse(positionMs) ?? 0));
-    if (isPlayingNotifier.value) {
-      _startPositionTimer();
-    }
+  Future<void> _loadPlayState() async {
+    final content = await _playState.readAsString();
+    final Map<String, dynamic> json =
+        jsonDecode(content) as Map<String, dynamic>;
+
+    currentIndex = json['currentIndex'] as int? ?? -1;
+    playModeNotifier.value = json['playMode'] as int? ?? 0;
+    _tmpPlayMode = json['tmpPlayMode'] as int? ?? 0;
+
+    _handleUsbAudioStatus();
+    final restoredVolume = outputUserVolume(
+      active: false,
+      requested: (json['volume'] as double? ?? 1),
+    );
+    _sharedUserVolume = restoredVolume;
+    _appliedUserVolume = restoredVolume;
+    _volumeRampTarget = restoredVolume;
+    volumeNotifier.value = restoredVolume;
+    _applyUserVolume(restoredVolume);
   }
 
-  // 每秒把当前位置写入文件，重启后由 restoreCurrentSong 恢复（上游同款）；
-  // getPosition 在独占激活时返回独占位置，独占播放同样适用
   void _startPositionTimer() {
     _positionTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
       _positionState.writeAsString(getPosition().inMilliseconds.toString());
@@ -809,8 +902,6 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         'playMode': playModeNotifier.value,
         'tmpPlayMode': _tmpPlayMode,
         'volume': _sharedUserVolume,
-        'usbExclusiveDeviceVolumes':
-            usbAudioPreferences.toMap()['usbExclusiveDeviceVolumes'],
       }),
     );
   }
@@ -821,16 +912,16 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
     final content = await _equalizerState.readAsString();
     gains = (jsonDecode(content) as List<dynamic>).cast();
-    applyEqualizer();
+    await applyEqualizer();
   }
 
   void saveEqualizerState() {
     _equalizerState.writeAsStringSync(jsonEncode(gains));
   }
 
-  void saveAllStates() {
+  void saveAllStates() async {
+    await audioHandler._savePlayQueueState();
     audioHandler.savePlayState();
-    audioHandler._savePlayQueueState();
   }
 
   bool insert2Next(MyAudioMetadata song) {
@@ -868,13 +959,26 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     play();
   }
 
-  Future<void> setPlayQueue(List<MyAudioMetadata> source) async {
+  Future<void> setPlayQueue(
+    List<MyAudioMetadata> source,
+    int playMode, {
+    int? targetIndex,
+  }) async {
+    if (targetIndex != null) {
+      currentIndex = targetIndex;
+    } else {
+      currentIndex = playMode == 0 ? 0 : math.Random().nextInt(source.length);
+      playModeNotifier.value = playMode;
+    }
     playQueue = List.from(source);
     if (playModeNotifier.value == 1 ||
         (playModeNotifier.value == 2 && audioHandler._tmpPlayMode == 1)) {
       shuffle();
     }
-    _savePlayQueueState();
+    await audioHandler.load();
+    audioHandler.play();
+
+    saveAllStates();
   }
 
   void reversePlayQueue() {
@@ -897,7 +1001,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     currentIndex = 0;
   }
 
-  void changePlayMode(int newPlayMode) {
+  void changePlayMode(int newPlayMode) async {
     if (newPlayMode == playModeNotifier.value) {
       return;
     }
@@ -908,38 +1012,21 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
           playQueue = List.from(_playQueueTmp);
           _playQueueTmp = [];
           currentIndex = playQueue.indexOf(currentSongNotifier.value!);
-          _savePlayQueueState();
         }
         break;
       case 1:
         if (_playQueueTmp.isEmpty) {
           shuffle();
-          _savePlayQueueState();
         }
         break;
       default:
         break;
     }
-
     playModeNotifier.value = newPlayMode;
-
-    savePlayState();
-  }
-
-  void switchPlayMode() {
-    int playMode = playModeNotifier.value;
-    playMode += 1;
-    playMode %= 2;
-    playModeNotifier.value = playMode;
-    if (playMode == 0) {
-      playQueue = List.from(_playQueueTmp);
-      _playQueueTmp = [];
-      currentIndex = playQueue.indexOf(currentSongNotifier.value!);
-      _savePlayQueueState();
-    } else if (playMode == 1) {
-      shuffle();
-      _savePlayQueueState();
+    if (newPlayMode != 2) {
+      await _savePlayQueueState();
     }
+
     savePlayState();
   }
 
@@ -968,8 +1055,34 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     currentIndex = -1;
     currentSongNotifier.value = null;
     currentCoverArtColor = Colors.grey;
-    _savePlayQueueState();
-    savePlayState();
+    saveAllStates();
+  }
+
+  Future<void> justClear() async {
+    library.replayGainMetadataChangedNotifier.removeListener(
+      _handleReplayGainMetadataChanged,
+    );
+    ++_loadGeneration;
+    if (_usbExclusiveActive) {
+      await _stopExclusiveIntentionally();
+      _usbExclusiveActive = false;
+      _usbExclusivePosition = Duration.zero;
+    }
+    _cancelVolumeRamp();
+    _cancelOutputGainRamp();
+    await _player.stop();
+    await _superLyric.sendStop();
+    _superLyric.reset();
+    updateIsPlaying(false);
+    updatePlaybackState(stop: true);
+    _positionTimer?.cancel();
+    _positionTimer = null;
+
+    playQueue = [];
+    _playQueueTmp = [];
+    currentIndex = -1;
+    currentSongNotifier.value = null;
+    currentCoverArtColor = Colors.grey;
   }
 
   List<MyAudioMetadata> getNewQueue(List<MyAudioMetadata> oldQueue) {
@@ -984,30 +1097,45 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   Future<void> sync() async {
-    isSyncing = true;
-    playQueue = getNewQueue(playQueue);
-    _playQueueTmp = getNewQueue(_playQueueTmp);
-    final currentSong = currentSongNotifier.value;
-    if (currentSong != null) {
-      final tmpCurrentSong = library.id2Song[currentSong.id];
-      if (tmpCurrentSong != null) {
-        await _setLyricsAndUpdateColors(tmpCurrentSong);
-        currentSongNotifier.value = tmpCurrentSong;
-        currentIndex = playQueue.indexOf(tmpCurrentSong);
-        updateServiceMediaItem(tmpCurrentSong);
-      } else {
-        currentSongNotifier.value = null;
-        currentIndex = -1;
-        if (playQueue.isNotEmpty) {
-          await skipToNext();
+    if (isNotStreamSource) {
+      playQueue = getNewQueue(playQueue);
+      _playQueueTmp = getNewQueue(_playQueueTmp);
+      final currentSong = currentSongNotifier.value;
+      if (currentSong != null) {
+        final tmpCurrentSong = library.id2Song[currentSong.id];
+        if (tmpCurrentSong != null) {
+          await _setLyricsAndUpdateColors(tmpCurrentSong);
+          currentSongNotifier.value = tmpCurrentSong;
+          currentIndex = playQueue.indexOf(tmpCurrentSong);
+          updateServiceMediaItem(tmpCurrentSong);
         } else {
-          await stop();
+          currentSongNotifier.value = null;
+          currentIndex = -1;
+          if (playQueue.isNotEmpty) {
+            await skipToNext();
+          } else {
+            await stop();
+          }
         }
       }
+      saveAllStates();
+    } else {
+      await _loadPlayQueueState();
+      currentIndex = playQueue.indexWhere(
+        (e) => e.id == currentSongNotifier.value?.id,
+      );
+      if (currentIndex != -1) {
+        final tmpCurrentSong = playQueue[currentIndex];
+        await _setLyricsAndUpdateColors(tmpCurrentSong);
+        currentSongNotifier.value = tmpCurrentSong;
+        updateServiceMediaItem(tmpCurrentSong);
+      } else if (playQueue.isNotEmpty) {
+        await skipToNext();
+      } else {
+        currentSongNotifier.value = null;
+        await stop();
+      }
     }
-    isSyncing = false;
-    _savePlayQueueState();
-    savePlayState();
   }
 
   Future<void> _setLyricsAndUpdateColors(
@@ -1015,7 +1143,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     int? generation,
   }) async {
     await setParsedLyrics(song);
-    final coverArtColor = await computeCoverArtColor(song);
+    final coverArtColor = await computeColor(song.picture);
     // 异步获取期间用户已切到别的歌：不把过期配色覆盖到当前界面
     if (generation != null && generation != _loadGeneration) {
       return;
@@ -1044,9 +1172,20 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       if (_playLastSyncTime != null) {
         _playedDuration += DateTime.now().difference(_playLastSyncTime!);
       }
-      if (previousSong.duration != null) {
-        double times =
-            _playedDuration.inSeconds / previousSong.duration!.inSeconds;
+
+      int durationSeconds = getDuration(currentSongNotifier.value).inSeconds;
+      // fix wrong duration
+      if (durationSeconds <= 0) {
+        durationSeconds = _player.state.duration.inSeconds;
+        if (durationSeconds > 0 && isNotStreamSource) {
+          await library.updateDuration(
+            currentSongNotifier.value!,
+            _player.state.duration,
+          );
+        }
+      }
+      if (durationSeconds > 0) {
+        double times = _playedDuration.inSeconds / durationSeconds;
         if (times > 0.5) {
           library.tryAddCache(previousSong);
           history.addSongTimes(previousSong, times.round());
@@ -1079,18 +1218,20 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
 
     currentSongNotifier.value = currentSong;
     unawaited(
-      lyricsAndColorsReady.then((_) {
-        if (generation != _loadGeneration) {
-          return;
-        }
-        _superLyric.updateLines(currentSong.parsedLyrics!.lines);
-        updateLyricsNotifier.value++;
-        if (isPlayingNotifier.value) {
-          unawaited(_superLyric.publishAt(getPosition()));
-        }
-      }).catchError((Object error) {
-        logger.output("set lyrics and colors failed:$error");
-      }),
+      lyricsAndColorsReady
+          .then((_) {
+            if (generation != _loadGeneration) {
+              return;
+            }
+            _superLyric.updateLines(currentSong.parsedLyrics!.lines);
+            updateLyricsNotifier.value++;
+            if (isPlayingNotifier.value) {
+              unawaited(_superLyric.publishAt(getPosition()));
+            }
+          })
+          .catchError((Object error) {
+            logger.output("set lyrics and colors failed:$error");
+          }),
     );
 
     isLoading = true;
@@ -1165,6 +1306,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
     updatePlaybackState(postion: startPosition);
     _prefetchNextSongCache();
+    if (start == null) _positionState.writeAsString('0');
   }
 
   /// 独占模式连播优化：当前曲开播后预下载队列下一首云端歌曲，
@@ -1181,7 +1323,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     final current = playQueue[currentIndex];
     final next = playQueue[(currentIndex + 1) % playQueue.length];
     final generation = _loadGeneration;
-    if (next.sourceType == .local || next.cacheExist) {
+    if (sourceType == .local || next.cacheExist) {
       return;
     }
     unawaited(() async {
@@ -1276,8 +1418,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     final transition = safeOutputGainTransition(
       appliedGain: _appliedOutputGain,
       userGain: digitalGain,
-      adjustmentDb:
-          _effectiveReplayGainDb(digitalGain) + dsdCompensationDb,
+      adjustmentDb: _effectiveReplayGainDb(digitalGain) + dsdCompensationDb,
     );
     final previousOutputGain = _appliedOutputGain;
     _appliedOutputGain = transition.appliedGain;
@@ -1288,9 +1429,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       sourceFormat: _normalizedExclusiveFormat(song),
       sampleRate: exclusiveSampleRate,
       bitDepth: isDsd ? null : _preferredExclusiveBitDepth(),
-      dsdMode: isDsd
-          ? usbAudioPreferences.dsdModeNotifier.value.name
-          : null,
+      dsdMode: isDsd ? usbAudioPreferences.dsdModeNotifier.value.name : null,
       volumeGain: digitalGain,
       replayGainDb: transition.adjustmentDb - dsdCompensationDb,
       volumeMode: usbAudioPreferences.volumeControlModeNotifier.value.name,
@@ -1396,8 +1535,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     MyAudioMetadata song, {
     int? generation,
   }) async {
-    if (song.sourceType == .local && song.path != null) {
-      return await convertToRealPathIfNeed(song.path!) ?? song.path;
+    if (sourceType == .local && song.path != null) {
+      return await covertToRedirectPathIfNeed(song.path!) ?? song.path;
     }
 
     if (song.cacheExist && song.cachePath != null) {
@@ -1612,8 +1751,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   void updateServiceMediaItem(MyAudioMetadata currentSong) {
     Uri? artUri;
 
-    if (currentSong.pictureExist) {
-      artUri = File(currentSong.picturePath).uri;
+    if (currentSong.picture.isExist) {
+      artUri = File(currentSong.picture.path).uri;
     }
 
     mediaItem.add(
@@ -1695,6 +1834,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     updatePlaybackState();
     _positionTimer?.cancel();
     _positionTimer = null;
+    _positionState.writeAsString(getPosition().inMilliseconds.toString());
   }
 
   @override
@@ -1714,6 +1854,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     updatePlaybackState(stop: true);
     _positionTimer?.cancel();
     _positionTimer = null;
+    _positionState.writeAsString(Duration.zero.inMilliseconds.toString());
   }
 
   @override
@@ -1736,6 +1877,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       unawaited(_superLyric.publishAt(position));
     }
     updateLyricsNotifier.value++;
+    _positionState.writeAsString(getPosition().inMilliseconds.toString());
   }
 
   @override
@@ -1766,8 +1908,19 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     return _positionController.stream;
   }
 
+  Stream<Duration> getDurationStream() {
+    return _durationController.stream.distinct();
+  }
+
   Duration getPosition() {
     return _usbExclusiveActive ? _usbExclusivePosition : _player.state.position;
+  }
+
+  Duration getCurrentDuration() {
+    return _usbExclusiveActive
+        ? usbExclusivePlaybackStateNotifier.value.duration ??
+              getDuration(currentSongNotifier.value)
+        : _player.state.duration;
   }
 
   void setVolume(double volume) {
@@ -1785,24 +1938,19 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       return;
     }
 
-    _applyUserVolume(
-      nextSafeUsbVolume(_appliedUserVolume, _volumeRampTarget),
-    );
+    _applyUserVolume(nextSafeUsbVolume(_appliedUserVolume, _volumeRampTarget));
     if (_appliedUserVolume + 0.000001 >= _volumeRampTarget) {
       return;
     }
-    _volumeRampTimer ??= Timer.periodic(
-      const Duration(milliseconds: 100),
-      (_) {
-        _applyUserVolume(
-          nextSafeUsbVolume(_appliedUserVolume, _volumeRampTarget),
-        );
-        if (_appliedUserVolume + 0.000001 >= _volumeRampTarget) {
-          _cancelVolumeRamp();
-          savePlayState();
-        }
-      },
-    );
+    _volumeRampTimer ??= Timer.periodic(const Duration(milliseconds: 100), (_) {
+      _applyUserVolume(
+        nextSafeUsbVolume(_appliedUserVolume, _volumeRampTarget),
+      );
+      if (_appliedUserVolume + 0.000001 >= _volumeRampTarget) {
+        _cancelVolumeRamp();
+        savePlayState();
+      }
+    });
   }
 
   Future<void>? _applyUserVolume(
@@ -1977,8 +2125,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     final transition = safeOutputGainTransition(
       appliedGain: _appliedOutputGain,
       userGain: digitalGain,
-      adjustmentDb:
-          _effectiveReplayGainDb(digitalGain) + dsdCompensationDb,
+      adjustmentDb: _effectiveReplayGainDb(digitalGain) + dsdCompensationDb,
       maxIncreaseDb: maxIncreaseDb,
     );
     _appliedOutputGain = transition.appliedGain;
@@ -1990,9 +2137,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       smoothHandoff: usbAudioPreferences.volumeSmoothHandoffNotifier.value,
     );
     if (_usbExclusiveActive) {
-      _publishExclusiveReplayGainState(
-        usbExclusivePlaybackStateNotifier.value,
-      );
+      _publishExclusiveReplayGainState(usbExclusivePlaybackStateNotifier.value);
     }
     if (transition.needsRamp) {
       _scheduleOutputGainRamp(maxIncreaseDb);
@@ -2104,7 +2249,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
   }
 
-  void applyEqualizer() async {
+  Future<void> applyEqualizer() async {
     bool isAllZero = gains.every((g) => g.abs() < 0.01);
     String af = '';
 

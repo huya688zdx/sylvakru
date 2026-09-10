@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-import 'package:sylvakru/base/app.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -12,8 +11,6 @@ class MetadataItems extends Table {
   TextColumn get id => text()();
 
   IntColumn get modified => integer().nullable()();
-
-  TextColumn get sourceType => textEnum<SourceType>()();
 
   TextColumn get format => text().nullable()();
 
@@ -51,7 +48,7 @@ class MetadataDB extends _$MetadataDB {
   MetadataDB(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -63,11 +60,25 @@ class MetadataDB extends _$MetadataDB {
         if (from < 2) {
           await m.addColumn(metadataItems, metadataItems.albumArtist);
         }
-        if (from < 3) {
-          await m.addColumn(metadataItems, metadataItems.replayGainTrackGainDb);
-          await m.addColumn(metadataItems, metadataItems.replayGainTrackPeak);
-          await m.addColumn(metadataItems, metadataItems.replayGainAlbumGainDb);
-          await m.addColumn(metadataItems, metadataItems.replayGainAlbumPeak);
+
+        if (from < 4) {
+          // 两个分支的版本 3 结构不同，按现有列迁移并保留音量标签。
+          final columns = (await customSelect(
+            'PRAGMA table_info(metadata_items)',
+          ).get()).map((row) => row.read<String>('name')).toSet();
+          for (final column in [
+            metadataItems.replayGainTrackGainDb,
+            metadataItems.replayGainTrackPeak,
+            metadataItems.replayGainAlbumGainDb,
+            metadataItems.replayGainAlbumPeak,
+          ]) {
+            if (!columns.contains(column.$name)) {
+              await m.addColumn(metadataItems, column);
+            }
+          }
+          if (columns.contains('source_type')) {
+            await m.dropColumn(metadataItems, 'source_type');
+          }
         }
       },
     );
@@ -80,6 +91,6 @@ LazyDatabase openMetadataDB(String name) {
 
     final file = File(p.join(dir.path, name));
 
-    return NativeDatabase(file);
+    return NativeDatabase.createInBackground(file);
   });
 }

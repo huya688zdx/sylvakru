@@ -1,14 +1,15 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/asset_images.dart';
-import 'package:sylvakru/base/utils/format_duration.dart';
+import 'package:sylvakru/base/utils/common_utils.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/widgets/buttons.dart';
 import 'package:sylvakru/base/widgets/cover_art_widget.dart';
 import 'package:sylvakru/base/widgets/playlist_widgets.dart';
+import 'package:sylvakru/base/widgets/song_info.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/base/services/keyboard.dart';
 import 'package:sylvakru/base/utils/metadata_utils.dart';
@@ -236,8 +237,16 @@ class PlayQueuePageState extends State<PlayQueuePage> {
               leading: Stack(
                 children: [
                   viewModeNotifier.value == .mini
-                      ? CoverArtWidget(size: 40, borderRadius: 4, song: song)
-                      : CoverArtWidget(size: 50, borderRadius: 5, song: song),
+                      ? CoverArtWidget(
+                          size: 40,
+                          borderRadius: 4,
+                          picture: song.picture,
+                        )
+                      : CoverArtWidget(
+                          size: 50,
+                          borderRadius: 5,
+                          picture: song.picture,
+                        ),
                   ValueListenableBuilder(
                     valueListenable: showPlayButtonNotifier,
                     builder: (context, value, child) {
@@ -396,6 +405,21 @@ class PlayQueuePageState extends State<PlayQueuePage> {
                   },
                 ),
               );
+
+              if (selectedSongList.length == 1) {
+                menuItems.add(
+                  MenuItem(
+                    text: l10n.songInfo,
+                    iconData: Icons.info_outline_rounded,
+                    callback: () {
+                      showAnimationDialog(
+                        context: context,
+                        child: SongInfo(song: selectedSongList[0]),
+                      );
+                    },
+                  ),
+                );
+              }
 
               menuItems.add(
                 MenuItem(

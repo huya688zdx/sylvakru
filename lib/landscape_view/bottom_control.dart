@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
@@ -91,7 +91,7 @@ class BottomControl extends StatelessWidget {
                     child: CoverArtWidget(
                       size: 50,
                       borderRadius: 5,
-                      song: currentSong,
+                      picture: currentSong?.picture,
                     ),
                   ),
                   title: Text(
@@ -156,7 +156,7 @@ class BottomControl extends StatelessWidget {
         Spacer(),
         IconButton(
           onPressed: () {
-            showCenterMessage(context, 'Desktop lyrics has been removed');
+            showCenterMessage('Desktop lyrics has been removed');
           },
           icon: const ImageIcon(desktopLyricsImage, size: 25),
         ),

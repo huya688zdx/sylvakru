@@ -1,20 +1,21 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:auto_size_text/auto_size_text.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
+import 'package:rive_animated_icon/rive_animated_icon.dart';
 import 'package:smooth_corner/smooth_corner.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/data/artist_album.dart';
-import 'package:sylvakru/base/data/song_list_manager.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/keyboard.dart';
-import 'package:sylvakru/base/utils/format_duration.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
+import 'package:sylvakru/base/utils/common_utils.dart';
 import 'package:sylvakru/base/utils/media_query.dart';
 import 'package:sylvakru/base/utils/source_type.dart';
 import 'package:sylvakru/base/widgets/cover_art_widget.dart';
@@ -40,9 +41,10 @@ import 'package:sylvakru/layer/artists_layer.dart';
 import 'package:sylvakru/layer/folders_layer.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/layer/playlists_layer.dart';
+import 'package:sylvakru/layer/ranking_layer.dart';
+import 'package:sylvakru/layer/recently_layer.dart';
 import 'package:sylvakru/portrait_view/custom_appbar_leading.dart';
 import 'package:sylvakru/portrait_view/my_search_field.dart';
-import 'package:sylvakru/portrait_view/song_list_tile.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 part '../../landscape_view/panels/song_list_panel.dart';
@@ -58,7 +60,7 @@ class SongList extends StatefulWidget {
 
   final bool isRoot;
 
-  final SourceType sourceType;
+  final String? albumRootLabel;
 
   const SongList({
     super.key,
@@ -69,7 +71,8 @@ class SongList extends StatefulWidget {
     this.isRanking = false,
     this.isRecently = false,
     this.isRoot = true,
-    this.sourceType = .local,
+
+    this.albumRootLabel,
   });
 
   @override
@@ -78,8 +81,9 @@ class SongList extends StatefulWidget {
 
 class _SongListState extends State<SongList> {
   String title = '';
-  late SongListManager songListManager;
-  late List<MyAudioMetadata> songList;
+  List<MyAudioMetadata> songList = [];
+  List<MyAudioMetadata> tmpSongList = [];
+
   Playlist? playlist;
   Artist? artist;
   Album? album;
@@ -89,14 +93,14 @@ class _SongListState extends State<SongList> {
   bool isRanking = false;
   bool isRecently = false;
 
-  bool reorderable = false;
-
-  late SourceType sourceType;
+  bool canModify = false;
 
   Timer? timer;
 
   bool waitForSecondClick = false;
   Timer? doubleClicktimer;
+
+  Timer? searchTimer;
 
   final currentSongListNotifier = ValueNotifier<List<MyAudioMetadata>>([]);
 
@@ -113,17 +117,20 @@ class _SongListState extends State<SongList> {
   final scrollController = ScrollController();
   final textController = TextEditingController();
 
-  ValueNotifier<int> sortTypeNotifier = ValueNotifier(0);
+  String get searchValue => textController.text;
 
-  List<ValueNotifier<bool>> isSelectedList = [];
-  bool isFixed = false;
+  bool isSearching = false;
+
+  ValueNotifier<int> sortTypeNotifier = ValueNotifier(0);
+  ValueNotifier<int> changeNotifier = ValueNotifier(0);
+
+  Map<MyAudioMetadata, ValueNotifier<bool>> isSelectedNotifierMap = {};
+
   int continuousSelectBeginIndex = 0;
 
   final showPlayButtonNotifierMap = <MyAudioMetadata, ValueNotifier<bool>>{};
 
   final padding = const EdgeInsets.symmetric(horizontal: 30);
-
-  final isSearchNotifier = ValueNotifier(false);
 
   ValueNotifier<bool>? rootVisibleNotifier;
   Function()? backToRoot;
@@ -131,6 +138,19 @@ class _SongListState extends State<SongList> {
   bool hideOthers = false;
 
   String rootLabel = '';
+
+  bool prepareing = true;
+
+  bool get reorderable {
+    return !albumStructureActive &&
+        searchValue.isEmpty &&
+        sortTypeNotifier.value == 0 &&
+        (playlist != null ||
+            folder != null ||
+            (isLibrary && isNotStreamSource));
+  }
+
+  bool get isFixed => isMobile || !reorderable;
 
   void updateHideOthers() {
     setState(() {
@@ -155,56 +175,147 @@ class _SongListState extends State<SongList> {
 
   ValueNotifier<bool> get albumStructureNotifier => playlist != null
       ? playlistManager.useAlbumStructureNotifier
-      : library.useAlbumStructureNotifier;
+      : songsUseAlbumStructureNotifier;
 
   bool get albumStructureActive =>
       albumStructureSupported && albumStructureNotifier.value;
 
+  MyPicture? get mainPicture {
+    MyPicture? picture = getFirstSong(songList)?.picture;
+    if (isStreamSource) {
+      if (artist != null) {
+        picture = artist!.picture;
+      } else if (album != null) {
+        picture = album!.picture;
+      }
+    }
+    return picture;
+  }
+
+  int currentRequestId = 0;
+  Future<List<MyAudioMetadata>?> _fetchSongList(int offset) async {
+    currentRequestId++;
+    int tmp = currentRequestId;
+    final result = await streamClient?.searchSongs(searchValue, 100, offset);
+    if (!mounted) {
+      return null;
+    }
+    if (tmp == currentRequestId) {
+      return result;
+    }
+    return null;
+  }
+
+  void resetSelectedAndUpdateSongList() {
+    continuousSelectBeginIndex = 0;
+    for (final tmp in isSelectedNotifierMap.values) {
+      tmp.value = false;
+    }
+    updateSongList();
+  }
+
   void updateSongList() {
-    final value = textController.text;
-    final filteredSongList = filterSongList(songList, value);
-    if (albumStructureActive) {
-      // 专辑结构固定按专辑升序排列，专辑内按碟号/音轨号
-      sortSongList(5, filteredSongList);
-    } else {
-      sortSongList(sortTypeNotifier.value, filteredSongList);
+    prepareing = false;
+
+    final currentSongList = List<MyAudioMetadata>.from(
+      searchValue.isEmpty ? songList : tmpSongList,
+    );
+
+    showPlayButtonNotifierMap.clear();
+    for (var e in currentSongList) {
+      showPlayButtonNotifierMap[e] = ValueNotifier(false);
+      isSelectedNotifierMap.putIfAbsent(e, () => ValueNotifier(false));
     }
 
+    if (playlist != null) {
+      canModify = playlist!.canModify;
+    } else if (folder != null) {
+      canModify = folder!.canModify;
+    } else if (isLibrary) {
+      canModify = library.canModify;
+    }
+    sortSongList(
+      albumStructureActive ? 5 : sortTypeNotifier.value,
+      currentSongList,
+    );
     albumStructureRows = [];
     albumGroupStarts = [];
     if (albumStructureActive) {
       String? lastAlbum;
-      for (int i = 0; i < filteredSongList.length; i++) {
-        final album = getAlbum(filteredSongList[i]);
+      for (int i = 0; i < currentSongList.length; i++) {
+        final album = getAlbum(currentSongList[i]);
         if (album != lastAlbum) {
           lastAlbum = album;
           albumGroupStarts.add(i);
           albumStructureRows.add(-i - 1);
         }
-        if (!collapsedAlbums.contains(album)) {
-          albumStructureRows.add(i);
-        }
+        if (!collapsedAlbums.contains(album)) albumStructureRows.add(i);
       }
     }
-    currentSongListNotifier.value = filteredSongList;
+    currentSongListNotifier.value = currentSongList;
+  }
 
-    isSelectedList = List.generate(
-      filteredSongList.length,
-      (_) => ValueNotifier(false),
-    );
-    isFixed =
-        isMobile ||
-        !reorderable ||
-        textController.text.isNotEmpty ||
-        sortTypeNotifier.value > 0 ||
-        albumStructureActive;
-
-    continuousSelectBeginIndex = 0;
-
-    showPlayButtonNotifierMap.clear();
-    for (var e in filteredSongList) {
-      showPlayButtonNotifierMap[e] = ValueNotifier(false);
+  void startNewSearchIfNeed() {
+    if (prepareing) {
+      return;
     }
+    searchTimer?.cancel();
+    searchTimer = Timer(Duration(milliseconds: 300), () async {
+      if (searchValue.isNotEmpty) {
+        tmpSongList.clear();
+        if (isLibrary && sourceType == .navidrome) {
+          tmpSongList = await _fetchSongList(0) ?? [];
+          if (!mounted) {
+            return;
+          }
+        } else {
+          tmpSongList = filterSongList(songList, searchValue);
+        }
+      }
+      _reachEnd = false;
+      resetSelectedAndUpdateSongList();
+    });
+  }
+
+  bool _isLoadingMoreData = false;
+  bool _reachEnd = false;
+  void _onScroll() async {
+    if (prepareing | _isLoadingMoreData | _reachEnd) {
+      return;
+    }
+    _isLoadingMoreData = true;
+
+    if (scrollController.position.pixels >=
+        scrollController.position.maxScrollExtent) {
+      if (searchValue.isEmpty) {
+        final fetchedSongList = await streamClient?.getSongs(
+          100,
+          songList.length,
+        );
+        if (!mounted) {
+          return;
+        }
+        if (fetchedSongList == null) {
+          _isLoadingMoreData = false;
+          return;
+        }
+        _reachEnd = fetchedSongList.isEmpty;
+        songList.addAll(fetchedSongList);
+      } else {
+        final fetchedSongList = await _fetchSongList(tmpSongList.length);
+        if (!mounted) {
+          return;
+        }
+        if (fetchedSongList == null) {
+          _isLoadingMoreData = false;
+          return;
+        }
+        _reachEnd = fetchedSongList.isEmpty;
+        tmpSongList.addAll(fetchedSongList);
+      }
+      updateSongList();
+    }
+    _isLoadingMoreData = false;
   }
 
   @override
@@ -218,12 +329,11 @@ class _SongListState extends State<SongList> {
     isRanking = widget.isRanking;
     isRecently = widget.isRecently;
 
-    sourceType = widget.sourceType;
-
     if (playlist != null) {
       title = playlist!.name;
-      songListManager = playlist!.songListManager;
-      reorderable = true;
+      songList = playlist!.songList;
+      sortTypeNotifier = playlist!.sortTypeNotifier;
+      changeNotifier = playlist!.changeNotifier;
       if (!widget.isRoot) {
         rootVisibleNotifier = playlistsVisibleNotifier;
         backToRoot = () {
@@ -233,57 +343,87 @@ class _SongListState extends State<SongList> {
       }
     } else if (artist != null) {
       title = artist!.name;
-      songListManager = artist!.songListManager;
+      songList = artist!.songList;
       rootVisibleNotifier = artistsVisibleNotifier;
       backToRoot = () {
         layersManager.popDetail('artists');
       };
       rootLabel = 'artists';
+      changeNotifier = artist!.changeNotifier;
     } else if (album != null) {
       title = album!.name;
-      songListManager = album!.songListManager;
-      rootVisibleNotifier = albumsVisibleNotifier;
+      songList = album!.songList;
+      rootLabel = widget.albumRootLabel!;
+      if (rootLabel == 'albums') {
+        rootVisibleNotifier = albumsVisibleNotifier;
+      } else if (rootLabel == 'ranking') {
+        rootVisibleNotifier = rankingVisibleNotifier;
+      } else {
+        rootVisibleNotifier = recentlyVisibleNotifier;
+      }
       backToRoot = () {
-        layersManager.popDetail('albums');
+        layersManager.popDetail(widget.albumRootLabel!);
       };
-      rootLabel = 'albums';
     } else if (folder != null) {
       title = folder!.id;
-      reorderable = true;
+      songList = folder!.songList;
+      sortTypeNotifier = folder!.sortTypeNotifier;
+      changeNotifier = folder!.changeNotifier;
       rootVisibleNotifier = foldersVisibleNotifier;
       backToRoot = () {
         layersManager.popDetail('folders');
       };
       rootLabel = 'folders';
     } else if (isRanking) {
-      songListManager = history.rankingSongListManager;
+      songList = history.rankingSongList;
+      history.rankingChangeNotifier.addListener(updateSongList);
     } else if (isRecently) {
-      songListManager = history.recentlySongListManager;
+      songList = history.recentlySongList;
+      history.recentlyChangeNotifier.addListener(updateSongList);
     } else {
       isLibrary = true;
-      songListManager = library.songListManager;
-      reorderable = sourceType == .local || sourceType == .webdav;
+      songList = library.songList;
+      library.changeNotifier.addListener(updateSongList);
+      if (isStreamSource) {
+        scrollController.addListener(_onScroll);
+      }
     }
-    if (folder == null) {
-      songList = songListManager.getSongList2(sourceType);
-      sortTypeNotifier = songListManager.getSortTypeNotifier2(sourceType);
-      songListManager
-          .getChangeNotifier2(sourceType)
-          .addListener(updateSongList);
-    } else {
-      songList = folder!.songList;
-      sortTypeNotifier = folder!.sortTypeNotifier;
-      folder!.changeNotifier.addListener(updateSongList);
-    }
+
     rootVisibleNotifier?.addListener(updateHideOthers);
 
     if (albumStructureSupported) {
       albumStructureNotifier.addListener(updateSongList);
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (isStreamSource) {
+        if (songList.isEmpty) {
+          if (isLibrary) {
+            final songs = await streamClient?.getSongs(100, 0) ?? [];
 
-    updateSongList();
-    sortTypeNotifier.addListener(updateSongList);
-    textController.addListener(updateSongList);
+            if (!mounted) {
+              return;
+            }
+            songList.addAll(songs);
+            layersManager.updateBackground();
+          } else if (artist != null) {
+            await artist!.load();
+            if (!mounted) {
+              return;
+            }
+          } else if (album != null) {
+            await album!.load();
+            if (!mounted) {
+              return;
+            }
+          }
+        }
+      }
+      updateSongList();
+    });
+
+    sortTypeNotifier.addListener(resetSelectedAndUpdateSongList);
+    changeNotifier.addListener(updateSongList);
+    textController.addListener(startNewSearchIfNeed);
   }
 
   // 收起/展开专辑段
@@ -340,25 +480,18 @@ class _SongListState extends State<SongList> {
 
   @override
   void dispose() {
-    if (folder == null) {
-      songListManager
-          .getChangeNotifier2(sourceType)
-          .removeListener(updateSongList);
-    } else {
-      folder!.changeNotifier.removeListener(updateSongList);
-    }
-
     rootVisibleNotifier?.removeListener(updateHideOthers);
 
     if (albumStructureSupported) {
       albumStructureNotifier.removeListener(updateSongList);
     }
-
-    sortTypeNotifier.removeListener(updateSongList);
-    textController.removeListener(updateSongList);
+    sortTypeNotifier.removeListener(resetSelectedAndUpdateSongList);
+    changeNotifier.removeListener(updateSongList);
+    textController.removeListener(startNewSearchIfNeed);
     scrollController.dispose();
     timer?.cancel();
     doubleClicktimer?.cancel();
+    searchTimer?.cancel();
     super.dispose();
   }
 
@@ -366,9 +499,9 @@ class _SongListState extends State<SongList> {
     return ValueListenableBuilder(
       valueListenable: currentSongListNotifier,
       builder: (_, _, _) {
-        final song = getFirstSong(songList);
+        MyPicture? picture = mainPicture;
         return ListenableBuilder(
-          listenable: Listenable.merge([song?.updateNotifier]),
+          listenable: Listenable.merge([picture?.changeNotifier]),
           builder: (_, _) {
             return ValueListenableBuilder(
               valueListenable: mainPageThemeNotifier,
@@ -376,16 +509,20 @@ class _SongListState extends State<SongList> {
                 final coverArt = CoverArtWidget(
                   size: size,
                   borderRadius: size / 10,
-                  song: song,
+                  picture: picture,
                   elevation: 5,
                   color: colorManager.getSpecificMainPageCoverArtBaseColorForm(
-                    song,
+                    picture,
                   ), // keep stable color
                 );
+
                 return widget.isRoot
                     ? coverArt
                     : Hero(
-                        tag: (song == null ? sourceType.name : song.id) + title,
+                        tag:
+                            (picture?.id ?? '') +
+                            (album != null ? rootLabel : '') +
+                            getTitleText(AppLocalizations.of(context)),
                         transitionOnUserGestures: true,
                         flightShuttleBuilder:
                             (
@@ -403,6 +540,19 @@ class _SongListState extends State<SongList> {
         );
       },
     );
+  }
+
+  void moveToTop(int index) {
+    final item = songList.removeAt(index);
+    songList.insert(0, item);
+
+    if (isLibrary) {
+      library.update();
+    } else if (folder != null) {
+      folder!.update();
+    } else {
+      playlist!.update();
+    }
   }
 
   @override

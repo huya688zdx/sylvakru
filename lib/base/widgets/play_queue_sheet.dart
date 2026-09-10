@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/asset_images.dart';
@@ -181,7 +181,7 @@ class PlayQueueSheetState extends State<PlayQueueSheet> {
                         leading: CoverArtWidget(
                           size: 40,
                           borderRadius: 4,
-                          song: song,
+                          picture: song.picture,
                         ),
                         title: ValueListenableBuilder(
                           valueListenable: currentSongNotifier,

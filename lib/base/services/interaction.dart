@@ -3,19 +3,19 @@ import 'dart:math';
 import 'dart:ui';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/data/artist_album.dart';
+import 'package:sylvakru/base/data/loader.dart';
 import 'package:sylvakru/base/data/playlist.dart';
-import 'package:sylvakru/base/data/song_list_manager.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
-import 'package:sylvakru/base/services/metadata_service.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/utils/metadata_utils.dart';
-import 'package:sylvakru/base/utils/source_type.dart';
 import 'package:sylvakru/base/utils/zoom_page_route.dart';
 import 'package:sylvakru/base/widgets/cover_art_widget.dart';
 import 'package:sylvakru/base/widgets/custom_text_field.dart';
@@ -29,12 +29,18 @@ import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:smooth_corner/smooth_corner.dart';
 
-void showCenterMessage(
-  BuildContext context,
-  String message, {
-  int duration = 2000,
-}) {
-  final overlay = Overlay.of(context);
+DateTime? _lastShowTime;
+
+void showCenterMessage(String message, {int duration = 2000}) {
+  final now = DateTime.now();
+  if (_lastShowTime != null &&
+      now.difference(_lastShowTime!) < const Duration(seconds: 2)) {
+    return;
+  }
+  _lastShowTime = now;
+
+  final overlay = globalNavigatorKey.currentState?.overlay;
+  if (overlay == null) return;
   final overlayEntry = OverlayEntry(
     builder: (context) => Center(
       child: ConstrainedBox(
@@ -64,6 +70,28 @@ void showCenterMessage(
   });
 }
 
+OverlayEntry? _centerOverlayEntry;
+
+Future<void> showCenterLoading() async {
+  final overlay = globalNavigatorKey.currentState?.overlay;
+  if (overlay == null) return;
+  _centerOverlayEntry = OverlayEntry(
+    builder: (context) => Stack(
+      children: [
+        const ModalBarrier(dismissible: false, color: Colors.transparent),
+        Center(child: CircularProgressIndicator(color: iconColor.value)),
+      ],
+    ),
+  );
+
+  overlay.insert(_centerOverlayEntry!);
+}
+
+void removeCenterLoading() {
+  _centerOverlayEntry?.remove();
+  _centerOverlayEntry = null;
+}
+
 Future<bool> showConfirmDialog(BuildContext context, String action) async {
   final l10n = AppLocalizations.of(context);
 
@@ -73,7 +101,6 @@ Future<bool> showConfirmDialog(BuildContext context, String action) async {
       builder: (context) {
         return SizedBox(
           width: 300,
-          height: isMobile ? 180 : 170,
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: ListenableBuilder(
@@ -85,6 +112,7 @@ Future<bool> showConfirmDialog(BuildContext context, String action) async {
               ]),
               builder: (context, _) {
                 return Column(
+                  mainAxisSize: .min,
                   children: [
                     Align(
                       alignment: .centerLeft,
@@ -162,7 +190,6 @@ Future<String> getInputTextDialog(
     context: context,
     child: SizedBox(
       width: 300,
-      height: isMobile ? 220 : 200,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(30, 20, 30, 20),
         child: ValueListenableBuilder(
@@ -170,6 +197,7 @@ Future<String> getInputTextDialog(
           builder: (context, value, child) {
             final specificTextcolor = colorManager.getSpecificTextColor();
             return Column(
+              mainAxisSize: .min,
               children: [
                 Center(
                   child: Text(
@@ -349,10 +377,12 @@ Future<T?> showAnimationDialog<T>({
                                 smoothness: 1,
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              color: Color.alphaBlend(
-                                colorManager.getSpecificBgColor(),
-                                colorManager.getSpecificBgBaseColor(),
-                              ),
+                              color: firstLaunch
+                                  ? null
+                                  : Color.alphaBlend(
+                                      colorManager.getSpecificBgColor(),
+                                      colorManager.getSpecificBgBaseColor(),
+                                    ),
                               clipBehavior: Clip.antiAliasWithSaveLayer,
                               child: MediaQuery.removePadding(
                                 context: context,
@@ -589,7 +619,7 @@ class NativeMenu {
         style: TextStyle(
           fontFamily: icon.fontFamily,
           package: icon.fontPackage,
-          fontSize: Platform.isMacOS ? 18 : 24,
+          fontSize: 96,
           color: Colors.black,
         ),
       ),
@@ -759,7 +789,11 @@ void showSongOptions({
               SizedBox(height: 5),
 
               ListTile(
-                leading: CoverArtWidget(size: 50, borderRadius: 5, song: song),
+                leading: CoverArtWidget(
+                  size: 50,
+                  borderRadius: 5,
+                  picture: song.picture,
+                ),
                 title: Text(getTitle(song), overflow: TextOverflow.ellipsis),
                 subtitle: Text(
                   "${getArtist(song)} - ${getAlbum(song)}",
@@ -876,64 +910,13 @@ void showSongOptions({
                           horizontal: 0,
                           vertical: -4,
                         ),
-                        onTap: () async {
-                          Navigator.pop(context);
-                          final artists = getArtists(getArtist(song));
-
-                          if (artists.length == 1) {
-                            Navigator.of(context).push(
-                              ZoomPageRoute(
-                                builder: (context) {
-                                  return BigSingleArtistPanel(
-                                    artist: artistAlbumManager
-                                        .name2Artist[artists.first]!,
-                                  );
-                                },
-                              ),
-                            );
-                          } else {
-                            showAnimationDialog(
-                              context: context,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: max(
-                                    320,
-                                    min(MediaQuery.widthOf(context) / 3, 400),
-                                  ),
-                                  maxHeight:
-                                      MediaQuery.sizeOf(context).height * 0.8,
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(10),
-                                  child: ListView.builder(
-                                    shrinkWrap: true,
-                                    itemCount: artists.length,
-                                    itemBuilder: (context, index) {
-                                      final name = artists[index];
-                                      return ListTile(
-                                        title: Text(name),
-                                        onTap: name == excludedArtist
-                                            ? null
-                                            : () {
-                                                Navigator.of(context).pop();
-                                                Navigator.of(context).push(
-                                                  ZoomPageRoute(
-                                                    builder: (context) {
-                                                      return BigSingleArtistPanel(
-                                                        artist: artistAlbumManager
-                                                            .name2Artist[name]!,
-                                                      );
-                                                    },
-                                                  ),
-                                                );
-                                              },
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
+                        onTap: () {
+                          goToArtist(
+                            song,
+                            context,
+                            bigPictureMode: true,
+                            excludedArtist: excludedArtist,
+                          );
                         },
                       ),
 
@@ -948,26 +931,12 @@ void showSongOptions({
                           horizontal: 0,
                           vertical: -4,
                         ),
-                        onTap: () async {
+                        onTap: () {
                           Navigator.pop(context);
-                          await Future.delayed(Duration(milliseconds: 250));
-                          final album =
-                              artistAlbumManager.name2Album[getAlbum(song)]!;
-                          final baseColor = await computeCoverArtColor(
-                            album.getCoverSong(),
-                          );
-                          if (!context.mounted) {
-                            return;
-                          }
-                          Navigator.of(context).push(
-                            ZoomPageRoute(
-                              builder: (context) {
-                                return BigSingleAlbumPanel(
-                                  album: album,
-                                  baseColor: baseColor,
-                                );
-                              },
-                            ),
+                          goToAlbum(
+                            song,
+                            bigPictureMode: true,
+                            context: context,
                           );
                         },
                       ),
@@ -1020,66 +989,6 @@ void showSongOptions({
           ),
         );
       },
-    ),
-  );
-}
-
-void showSwitchDialogIfNeed(
-  BuildContext context,
-  SongListManager songListManager,
-) {
-  if (songListManager.notEmptyCount == 2) {
-    for (final sourceType in SourceType.values) {
-      if (sourceType != songListManager.sourceTypeNotifier.value &&
-          songListManager.getSongList2(sourceType).isNotEmpty) {
-        songListManager.sourceTypeNotifier.value = sourceType;
-        layersManager.updateBackground();
-        break;
-      }
-    }
-    return;
-  }
-  showAnimationDialog(
-    context: context,
-    child: SizedBox(
-      width: 300,
-      height: isMobile ? 280 : 260,
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Builder(
-          builder: (context) {
-            return ListView(
-              children: [
-                for (final sourceType in SourceType.values)
-                  if (songListManager.getSongList2(sourceType).isNotEmpty)
-                    ListTile(
-                      leading: Image(
-                        image: getSourceTypeImage(sourceType),
-                        height: 30,
-                        width: 30,
-                      ),
-                      title: Text(
-                        getSourceTypeName(
-                          AppLocalizations.of(context),
-                          sourceType,
-                        ),
-                      ),
-                      onTap: () async {
-                        Navigator.pop(context);
-                        await Future.delayed(Duration(milliseconds: 250));
-                        songListManager.sourceTypeNotifier.value = sourceType;
-                        layersManager.updateBackground();
-                      },
-                      trailing:
-                          songListManager.sourceTypeNotifier.value == sourceType
-                          ? Icon(Icons.check)
-                          : null,
-                    ),
-              ],
-            );
-          },
-        ),
-      ),
     ),
   );
 }
@@ -1180,10 +1089,7 @@ void showPlayQueueItemOptions(
   );
 }
 
-void showSongListOptions(
-  BuildContext context,
-  SongListManager songListManager,
-) {
+void showSongListOptions(BuildContext context, List<MyAudioMetadata> songList) {
   final l10n = AppLocalizations.of(context);
   showAnimationDialog(
     context: context,
@@ -1191,7 +1097,6 @@ void showSongListOptions(
       width: 300,
       child: Builder(
         builder: (context) {
-          final currentSongList = songListManager.getSongList();
           return Column(
             mainAxisSize: .min,
             children: [
@@ -1203,12 +1108,7 @@ void showSongListOptions(
                 onTap: () async {
                   Navigator.pop(context);
                   await Future.delayed(Duration(milliseconds: 250));
-
-                  audioHandler.currentIndex = 0;
-                  playModeNotifier.value = 0;
-                  await audioHandler.setPlayQueue(currentSongList);
-                  await audioHandler.load();
-                  audioHandler.play();
+                  audioHandler.setPlayQueue(songList, 0);
                 },
               ),
               ListTile(
@@ -1218,37 +1118,9 @@ void showSongListOptions(
                   Navigator.pop(context);
                   await Future.delayed(Duration(milliseconds: 250));
 
-                  audioHandler.currentIndex = Random().nextInt(
-                    currentSongList.length,
-                  );
-                  playModeNotifier.value = 1;
-                  await audioHandler.setPlayQueue(currentSongList);
-                  await audioHandler.load();
-                  audioHandler.play();
+                  audioHandler.setPlayQueue(songList, 1);
                 },
               ),
-              if (songListManager.notEmptyCount > 1)
-                ListTile(
-                  leading: Transform.scale(
-                    scale: 1.2,
-                    child: Image(
-                      image: getSourceTypeImage(
-                        songListManager.sourceTypeNotifier.value,
-                      ),
-                      width: 20,
-                      height: 20,
-                    ),
-                  ),
-                  title: Text(l10n.switch_),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await Future.delayed(Duration(milliseconds: 250));
-
-                    if (context.mounted) {
-                      showSwitchDialogIfNeed(context, songListManager);
-                    }
-                  },
-                ),
 
               ListTile(
                 leading: ImageIcon(selectImage),
@@ -1260,8 +1132,13 @@ void showSongListOptions(
                     Navigator.of(context).push(
                       ZoomPageRoute(
                         builder: (_) => SelectableSongListPage(
-                          songList: currentSongList,
+                          songList: songList,
                           reorderable: false,
+                          isSelectedNotifierMap: Map.fromEntries(
+                            songList.map(
+                              (e) => MapEntry(e, ValueNotifier(false)),
+                            ),
+                          ),
                         ),
                       ),
                     );
@@ -1304,12 +1181,6 @@ void showArtistsAlbumsOptions(BuildContext context, bool isArtist) {
                   await Future.delayed(Duration(milliseconds: 250));
 
                   isAscending.value = !isAscending.value;
-                  if (isArtist) {
-                    artistAlbumManager.sortArtists();
-                  } else {
-                    artistAlbumManager.sortAlbums();
-                  }
-                  artistAlbumManager.updateNotifier.value++;
                 },
               ),
 
@@ -1320,4 +1191,173 @@ void showArtistsAlbumsOptions(BuildContext context, bool isArtist) {
       ),
     ),
   );
+}
+
+Future<String?> _selectArtist(
+  BuildContext context,
+  List<String> artists, {
+  String? excludedArtist,
+}) async {
+  artists.removeWhere((e) => e == excludedArtist);
+  if (artists.isEmpty) {
+    return null;
+  }
+  if (artists.length == 1 && excludedArtist == null) {
+    return artists.first;
+  }
+
+  return showAnimationDialog(
+    context: context,
+    child: SizedBox(
+      width: 300,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 20, 10, 20),
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: artists.length,
+          itemExtent: 60,
+          itemBuilder: (context, index) {
+            String name = artists[index];
+
+            return Center(
+              child: ListTile(
+                leading: CoverArtWidget(
+                  size: 50,
+                  borderRadius: 5,
+                  picture: artistAlbumManager.artistMap[name]!.picture,
+                ),
+                title: Text(name, style: .new(overflow: .ellipsis)),
+                onTap: () {
+                  Navigator.pop(context, name);
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    ),
+  );
+}
+
+void goToArtist(
+  MyAudioMetadata song,
+  BuildContext context, {
+  bool bigPictureMode = false,
+  String? excludedArtist,
+}) async {
+  Artist? artist;
+  if (isNotStreamSource) {
+    final artistName = await _selectArtist(
+      context,
+      getArtists(getArtist(song)),
+      excludedArtist: excludedArtist,
+    );
+    artist = artistAlbumManager.artistMap[artistName];
+    if (artist == null) {
+      return;
+    }
+  } else {
+    if (artistAlbumManager.artistList.isEmpty) {
+      showCenterLoading();
+      await artistAlbumManager.loadArtists();
+      removeCenterLoading();
+    }
+
+    artist = artistAlbumManager.artistMap[song.artist];
+    if (artist == null) {
+      showCenterMessage('Get artist failed');
+      return;
+    }
+  }
+
+  if (bigPictureMode) {
+    if (context.mounted) {
+      Navigator.of(context).push(
+        ZoomPageRoute(
+          builder: (context) {
+            return BigSingleArtistPanel(artist: artist!);
+          },
+        ),
+      );
+    }
+  } else {
+    showCenterLoading();
+    await Future.delayed(Duration(milliseconds: 250));
+    layersManager.switchRootLayer('artists');
+    await layersManager.pushDetailIfNeed(artist);
+    removeCenterLoading();
+  }
+}
+
+Future<Album?> _loadStreamAlbum(MyAudioMetadata song) async {
+  // it probably would not happen
+  if (song.albumId == null) {
+    showCenterMessage('Can not get this album');
+    return null;
+  }
+
+  showCenterLoading();
+  if (artistAlbumManager.albumList.isEmpty) {
+    await artistAlbumManager.loadAlbums();
+  }
+  if (artistAlbumManager.albumMap[song.albumId] == null) {
+    final album = await streamClient?.getAlbum(song.albumId!);
+    if (album != null) {
+      artistAlbumManager.albumList.add(album);
+      artistAlbumManager.sortAlbums();
+      artistAlbumManager.updateNotifier.value++;
+    }
+  }
+  removeCenterLoading();
+
+  return artistAlbumManager.albumMap[song.albumId];
+}
+
+void goToAlbum(
+  MyAudioMetadata song, {
+  bool bigPictureMode = false,
+  BuildContext? context,
+}) async {
+  await Future.delayed(Duration(milliseconds: 250));
+
+  Album? album;
+  if (isNotStreamSource) {
+    album = artistAlbumManager.albumMap[getAlbum(song)];
+  } else {
+    album = await _loadStreamAlbum(song);
+  }
+  if (album == null) {
+    showCenterMessage('Get album failed');
+    return;
+  }
+
+  if (bigPictureMode) {
+    showCenterLoading();
+    final baseColor = await computeColor(album.picture);
+    if (!context!.mounted) {
+      return;
+    }
+    removeCenterLoading();
+
+    Navigator.of(context).push(
+      ZoomPageRoute(
+        builder: (context) {
+          return BigSingleAlbumPanel(album: album!, baseColor: baseColor);
+        },
+      ),
+    );
+    return;
+  }
+
+  layersManager.switchRootLayer('albums');
+
+  showCenterLoading();
+  if (isNotStreamSource) {
+    await layersManager.pushDetailIfNeed(
+      artistAlbumManager.albumMap[getAlbum(song)],
+    );
+  } else {
+    await layersManager.pushDetailIfNeed(album);
+  }
+  removeCenterLoading();
 }

@@ -3,8 +3,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:sylvakru/base/my_audio_metadata.dart';
-import 'package:sylvakru/base/services/metadata_service.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
 
 // 预模糊结果缓存：重开页面或来回切歌时直接复用，避免重复解码和模糊
 final _blurredCoverCache = <String, ui.Image>{};
@@ -19,14 +18,14 @@ const _blurredCoverCacheLimit = 12;
 /// 之后每帧只画一张小纹理。sigmaX/sigmaY 与原 BackdropFilter 的屏幕空间
 /// sigma 含义一致，内部按画布缩放比例换算，视觉效果与原来基本等价。
 class BlurredCoverArtWidget extends StatefulWidget {
-  final MyAudioMetadata? song;
+  final MyPicture? picture;
   final Color color;
   final double sigmaX;
   final double sigmaY;
 
   const BlurredCoverArtWidget({
     super.key,
-    required this.song,
+    required this.picture,
     required this.color,
     required this.sigmaX,
     required this.sigmaY,
@@ -52,10 +51,10 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final song = widget.song;
+        final picture = widget.picture;
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
-        if (song == null || width <= 0 || height <= 0) {
+        if (picture == null || width <= 0 || height <= 0) {
           return Container(color: widget.color);
         }
 
@@ -67,7 +66,7 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
         final sigmaY = widget.sigmaY * scale;
 
         final key =
-            '${song.picturePath}|${song.updateNotifier.value}'
+            '${picture.path}|${picture.changeNotifier.value}'
             '|${canvasWidth}x$canvasHeight'
             '|${sigmaX.toStringAsFixed(1)}|${sigmaY.toStringAsFixed(1)}'
             '|${widget.color.toARGB32()}';
@@ -78,7 +77,7 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
           Future.microtask(
             () => _prepare(
               key,
-              song,
+              picture,
               color,
               canvasWidth,
               canvasHeight,
@@ -99,7 +98,7 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
 
   Future<void> _prepare(
     String key,
-    MyAudioMetadata song,
+    MyPicture picture,
     Color color,
     int canvasWidth,
     int canvasHeight,
@@ -109,13 +108,13 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
     try {
       var cached = _blurredCoverCache[key];
       if (cached == null) {
-        await loadPictureSafe(song);
-        if (!song.pictureExist) {
+        await loadPictureSafe(picture);
+        if (!picture.isExist) {
           _setImage(null, key);
           return;
         }
         cached = await _renderBlurred(
-          song.picturePath,
+          picture.path,
           color,
           canvasWidth,
           canvasHeight,
@@ -125,7 +124,8 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
         _blurredCoverCache[key] = cached;
         _blurredCoverCacheKeys.add(key);
         if (_blurredCoverCacheKeys.length > _blurredCoverCacheLimit) {
-          _blurredCoverCache.remove(_blurredCoverCacheKeys.removeAt(0))
+          _blurredCoverCache
+              .remove(_blurredCoverCacheKeys.removeAt(0))
               ?.dispose();
         }
       } else {

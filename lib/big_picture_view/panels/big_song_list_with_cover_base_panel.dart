@@ -1,7 +1,6 @@
-import 'dart:math';
 import 'dart:ui';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:rive_animated_icon/rive_animated_icon.dart';
@@ -9,13 +8,13 @@ import 'package:smooth_corner/smooth_corner.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
 import 'package:sylvakru/base/audio_handler.dart';
+import 'package:sylvakru/base/data/folder.dart';
 import 'package:sylvakru/base/data/playlist.dart';
-import 'package:sylvakru/base/data/song_list_manager.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
-import 'package:sylvakru/base/services/metadata_service.dart';
-import 'package:sylvakru/base/utils/format_duration.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/utils/common_utils.dart';
 import 'package:sylvakru/base/utils/media_query.dart';
 import 'package:sylvakru/base/utils/metadata_utils.dart';
 import 'package:sylvakru/base/utils/source_type.dart';
@@ -37,24 +36,33 @@ abstract class BigSongListWithCoverBasePanelState<
 >
     extends State<T> {
   late final String title;
-  List<MyAudioMetadata> currentSongList = [];
-  late final SongListManager? songListManager;
+  List<MyAudioMetadata> songList = [];
 
   late Color baseColor;
-
-  late int sourceCount;
-  late SourceType sourceType;
 
   final _scrollController = ScrollController();
 
   void moveToTop(MyAudioMetadata song);
 
+  Folder? folder;
   Playlist? playlist;
 
+  Map<MyAudioMetadata, ValueNotifier<bool>> isSelectedNotifierMap = {};
+
+  final songListChangeNotifer = ValueNotifier(0);
+
   void updateSongList() async {
-    baseColor = await computeCoverArtColor(getFirstSong(currentSongList));
-    colorManager.updateBigPictureRelatedColors(getFirstSong(currentSongList));
-    setState(() {});
+    baseColor = await computeColor(getFirstSong(songList)?.picture);
+    colorManager.updateBigPictureRelatedColors(getFirstSong(songList)?.picture);
+    for (var e in songList) {
+      isSelectedNotifierMap.putIfAbsent(e, () => ValueNotifier(false));
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      songListChangeNotifer.value++;
+    });
   }
 
   @override
@@ -62,7 +70,12 @@ abstract class BigSongListWithCoverBasePanelState<
     useCurrentSongForBg = false;
     baseColor = widget.baseColor;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      colorManager.updateBigPictureRelatedColors(getFirstSong(currentSongList));
+      colorManager.updateBigPictureRelatedColors(
+        getFirstSong(songList)?.picture,
+      );
+      for (var e in songList) {
+        isSelectedNotifierMap.putIfAbsent(e, () => ValueNotifier(false));
+      }
     });
     super.initState();
   }
@@ -72,7 +85,9 @@ abstract class BigSongListWithCoverBasePanelState<
     useCurrentSongForBg = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      colorManager.updateBigPictureRelatedColors(currentSongNotifier.value);
+      colorManager.updateBigPictureRelatedColors(
+        currentSongNotifier.value?.picture,
+      );
     });
     _scrollController.dispose();
     super.dispose();
@@ -88,7 +103,10 @@ abstract class BigSongListWithCoverBasePanelState<
       fit: .expand,
       children: [
         if (mainPageThemeNotifier.value == .vivid) ...[
-          CoverArtWidget(song: getFirstSong(currentSongList), color: baseColor),
+          CoverArtWidget(
+            picture: getFirstSong(songList)?.picture,
+            color: baseColor,
+          ),
           RepaintBoundary(
             child: BackdropFilter(
               filter: ImageFilter.blur(
@@ -127,35 +145,33 @@ abstract class BigSongListWithCoverBasePanelState<
                     ),
 
                     IconButton(
-                      onPressed: () async {
-                        audioHandler.currentIndex = Random().nextInt(
-                          currentSongList.length,
-                        );
-                        playModeNotifier.value = 1;
-                        await audioHandler.setPlayQueue(currentSongList);
-                        await audioHandler.load();
-                        audioHandler.play();
-                      },
+                      onPressed: () => audioHandler.setPlayQueue(songList, 1),
+
                       icon: ImageIcon(shuffleImage),
                     ),
                     IconButton(
-                      onPressed: () async {
-                        audioHandler.currentIndex = 0;
-                        playModeNotifier.value = 0;
-                        await audioHandler.setPlayQueue(currentSongList);
-                        await audioHandler.load();
-                        audioHandler.play();
-                      },
+                      onPressed: () => audioHandler.setPlayQueue(songList, 0),
                       icon: Icon(Icons.play_arrow_rounded),
                       iconSize: 30,
                     ),
                     IconButton(
                       onPressed: () {
+                        for (var e in isSelectedNotifierMap.values) {
+                          e.value = false;
+                        }
                         Navigator.of(context).push(
                           ZoomPageRoute(
-                            builder: (_) => SelectableSongListPage(
-                              songList: currentSongList,
-                              reorderable: true,
+                            builder: (_) => ValueListenableBuilder(
+                              valueListenable: songListChangeNotifer,
+                              builder: (context, value, child) {
+                                return SelectableSongListPage(
+                                  songList: songList,
+                                  reorderable: true,
+                                  folder: folder,
+                                  playlist: playlist,
+                                  isSelectedNotifierMap: isSelectedNotifierMap,
+                                );
+                              },
                             ),
                           ),
                         );
@@ -176,42 +192,9 @@ abstract class BigSongListWithCoverBasePanelState<
               Row(
                 children: [
                   SizedBox(width: horizontalPadding),
-                  Text(getSourceTypeName(l10n, sourceType)),
-
-                  if (sourceCount > 1) ...[
-                    SizedBox(width: 10),
-                    GlassContainer(
-                      settings: LiquidGlassSettings(
-                        glassColor: glassColor.value,
-                      ),
-                      child: Material(
-                        color: Colors.transparent,
-                        shape: SmoothRectangleBorder(
-                          smoothness: 1,
-                          borderRadius: .circular(5),
-                        ),
-                        clipBehavior: .antiAlias,
-                        child: InkWell(
-                          onTap: () {
-                            showSwitchDialogIfNeed(context, songListManager!);
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8.0,
-                              vertical: 4.0,
-                            ),
-                            child: Text(
-                              AppLocalizations.of(context).switch_,
-                              style: .new(
-                                color: textColor.value,
-                                fontWeight: .bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  Text(
+                    '${getSourceTypeDisplayName(l10n, sourceType)}: ${l10n.songCount(songList.length)}',
+                  ),
                 ],
               ),
               SizedBox(height: 10),
@@ -262,7 +245,7 @@ abstract class BigSongListWithCoverBasePanelState<
           SliverToBoxAdapter(
             child: Center(
               child: Hero(
-                tag: 'big${getFirstSong(currentSongList)?.id}$title',
+                tag: 'big${getFirstSong(songList)?.picture.id ?? ''}$title',
                 flightShuttleBuilder:
                     (
                       flightContext,
@@ -272,7 +255,7 @@ abstract class BigSongListWithCoverBasePanelState<
                       toHeroContext,
                     ) => FittedBox(child: toHeroContext.widget),
                 child: CoverArtWidget(
-                  song: getFirstSong(currentSongList),
+                  picture: getFirstSong(songList)?.picture,
                   size: panelWidth * 0.6,
                   borderRadius: panelWidth * 0.06,
                 ),
@@ -289,7 +272,7 @@ abstract class BigSongListWithCoverBasePanelState<
       children: [
         SizedBox(width: 40),
         Hero(
-          tag: 'big${getFirstSong(currentSongList)?.id}$title',
+          tag: 'big${getFirstSong(songList)?.picture.id ?? ''}$title',
           flightShuttleBuilder:
               (
                 flightContext,
@@ -299,7 +282,7 @@ abstract class BigSongListWithCoverBasePanelState<
                 toHeroContext,
               ) => FittedBox(child: toHeroContext.widget),
           child: CoverArtWidget(
-            song: getFirstSong(currentSongList),
+            picture: getFirstSong(songList)?.picture,
             size: panelWidth * 0.2,
             borderRadius: panelWidth * 0.01,
           ),
@@ -313,20 +296,20 @@ abstract class BigSongListWithCoverBasePanelState<
   Widget songListView(bool sliver) {
     if (sliver) {
       return SliverList.builder(
-        itemCount: currentSongList.length,
+        itemCount: songList.length,
         itemBuilder: _itemBuilder,
       );
     }
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.only(bottom: 30, right: 40),
-      itemCount: currentSongList.length,
+      itemCount: songList.length,
       itemBuilder: _itemBuilder,
     );
   }
 
   Widget _itemBuilder(BuildContext context, int index) {
-    final song = currentSongList[index];
+    final song = songList[index];
     return Builder(
       builder: (itemContext) {
         return Material(
@@ -388,16 +371,22 @@ abstract class BigSongListWithCoverBasePanelState<
               builder: (context, currentSong, child) {
                 return Center(
                   child: currentSong == song
-                      ? ValueListenableBuilder(
-                          valueListenable: isPlayingNotifier,
-                          builder: (context, value, child) {
+                      ? ListenableBuilder(
+                          listenable: Listenable.merge([
+                            isPlayingNotifier,
+                            iconColor.valueNotifier,
+                          ]),
+                          builder: (context, child) {
                             return RiveAnimatedIcon(
-                              key: ValueKey(value),
+                              key: ValueKey(
+                                isPlayingNotifier.value.toString() +
+                                    iconColor.value.toString(),
+                              ),
                               riveIcon: .sound,
                               width: 35,
                               height: 35,
-                              loopAnimation: value,
-                              enableAbsorbPointer: true,
+                              loopAnimation: isPlayingNotifier.value,
+                              color: iconColor.value,
                             );
                           },
                         )
@@ -407,7 +396,7 @@ abstract class BigSongListWithCoverBasePanelState<
             ),
           ),
           CoverArtWidget(
-            song: song,
+            picture: song.picture,
             size: isNarrow ? 40 : 60,
             borderRadius: isNarrow ? 4 : 8,
           ),

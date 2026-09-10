@@ -7,7 +7,11 @@ import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/play_queue_logic.dart';
 
 MyAudioMetadata song(String id) {
-  return MyAudioMetadata(AudioMetadata(title: id), id: id);
+  return MyAudioMetadata(
+    AudioMetadata(title: id),
+    id: id,
+    path: id,
+  );
 }
 
 void main() {

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_switch/flutter_switch.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
@@ -26,6 +26,7 @@ class MySwitch extends StatelessWidget {
       return switcher();
     }
     return Row(
+      mainAxisSize: .min,
       children: [
         ValueListenableBuilder(
           valueListenable: valueNotifier,
@@ -38,7 +39,7 @@ class MySwitch extends StatelessWidget {
             );
           },
         ),
-        SizedBox(width: 10),
+        SizedBox(width: 5),
         switcher(),
       ],
     );

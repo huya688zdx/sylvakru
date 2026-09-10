@@ -4,10 +4,9 @@ import 'dart:ui';
 import 'package:charset/charset.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
-import 'package:sylvakru/base/services/subsonic_client.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
 import 'package:sylvakru/base/services/logger.dart';
-import 'package:sylvakru/base/services/navidrome_client.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/l10n/generated/app_localizations_en.dart';
 
@@ -99,17 +98,10 @@ Future<void> setParsedLyrics(MyAudioMetadata song) async {
     }
   }
 
-  if (song.sourceType == .subsonic) {
-    final lyrics = await subsonicClient!.getLyricsById(song.id);
-    if (lyrics != null) {
-      lines = lyrics.split(RegExp(r'[\n]'));
-    }
-  } else if (song.sourceType == .navidrome) {
-    final lyrics = await navidromeClient!.getLyricsById(song.id);
-    if (lyrics != null) {
-      lines = lyrics.split(RegExp(r'[\n]'));
-    }
-  } else if (song.sourceType == .emby) {
+  if (sourceType == .navidrome) {
+    final lyrics = await streamClient?.getLyricsById(song.id) ?? '';
+    lines = lyrics.split(RegExp(r'[\n]'));
+  } else if (sourceType == .emby) {
     result.lines.add(LyricLine(Duration.zero, l10n.noLyrics, []));
     return;
   } else {
@@ -118,7 +110,7 @@ Future<void> setParsedLyrics(MyAudioMetadata song) async {
       path = "${path.substring(0, path.lastIndexOf('.'))}.lrc";
 
       late File lrcFile;
-      if (song.sourceType == .webdav) {
+      if (sourceType == .webdav) {
         lrcFile = File('${tmpDir.path}/sylvakru_lyric');
         await webdavClient?.download(remotePath: path, localPath: lrcFile.path);
       } else {

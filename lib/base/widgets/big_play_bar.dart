@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:smooth_corner/smooth_corner.dart';
 import 'package:sylvakru/base/audio_handler.dart';
@@ -16,7 +16,7 @@ class BigPlayBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: 700),
+      constraints: BoxConstraints(maxWidth: 750),
       child: ValueListenableBuilder(
         valueListenable: currentSongNotifier,
         builder: (_, currentSong, _) {
@@ -75,7 +75,7 @@ class BigPlayBar extends StatelessWidget {
                                     child: CoverArtWidget(
                                       size: 40,
                                       borderRadius: 4,
-                                      song: currentSong,
+                                      picture: currentSong?.picture,
                                     ),
                                   ),
                                   SizedBox(width: 10),

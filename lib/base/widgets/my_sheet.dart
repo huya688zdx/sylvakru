@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:smooth_corner/smooth_corner.dart';
@@ -27,7 +27,7 @@ class MySheet extends StatelessWidget {
           ),
           clipBehavior: .antiAlias,
           child: SizedBox(
-            height: height ?? min(500, MediaQuery.heightOf(context) * 0.6),
+            height: min(height ?? 500, MediaQuery.heightOf(context) * 0.6),
             child: MediaQuery.removePadding(
               context: context,
               removeLeft: true, // for mobile

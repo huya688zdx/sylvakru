@@ -1,27 +1,33 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/data/config.dart';
 import 'package:sylvakru/base/data/artist_album.dart';
+import 'package:sylvakru/base/data/font_manager.dart';
 import 'package:sylvakru/base/services/bookmark_service.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/data/history.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
-import 'package:sylvakru/base/utils/path.dart';
-import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/data/setting.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:sylvakru/base/services/picture_load_scheduler.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/utils/common_utils.dart';
+import 'package:sylvakru/base/utils/path.dart';
+import 'package:sylvakru/layer/layers_manager.dart';
+
+bool firstLaunch = true;
 
 class Loader {
-  static bool _syncing = false;
+  static bool _busy = false;
 
-  static bool get syncing => _syncing;
+  static bool get busy => _busy;
 
-  static final syncStateNotifier = ValueNotifier(0);
+  static final stateNotifier = ValueNotifier(0);
 
   static Future<void> init() async {
     if (Platform.isAndroid) {
@@ -42,118 +48,131 @@ class Loader {
 
     colorManager.updateColors();
 
-    await library.loadFonts();
-    await library.initAllFolders();
-
-    await playlistManager.initAllPlaylists();
-
-    audioHandler.initStateFiles();
+    await fontManager.loadFonts();
   }
 
   static Future<void> load() async {
+    _busy = true;
+    stateNotifier.value++;
+
     await library.load();
 
-    artistAlbumManager.classify();
+    await audioHandler.loadStates();
 
     history.load();
 
     await playlistManager.load();
 
-    await audioHandler.loadStates();
-
-    if (!isTV) {
-      layersManager.switchRootLayer('songs');
+    if (isNotStreamSource) {
+      artistAlbumManager.classify();
     }
+    _busy = false;
+    stateNotifier.value++;
   }
 
-  static Future<void> _prepareForSync(SourceType sourceType) async {
-    await library.prepareForSync(sourceType);
-    history.prepareForSync(sourceType);
-    await playlistManager.prepareForSync(sourceType);
+  static Future<void> reload() async {
+    if (viewModeNotifier.value == .normal) {
+      layersManager.clearDataLayers();
+    }
+    pictureLoadScheduler.clear();
+    await audioHandler.justClear();
+    await library.cancelDownloads();
+
+    globalPictureList = [];
+
+    library = Library();
+    artistAlbumManager = ArtistAlbumManager();
+    history = History();
+
+    await load();
   }
 
-  static Future<void> _sync(SourceType sourceType) async {
-    await library.sync(sourceType);
-    history.sync(sourceType);
-    await playlistManager.sync(sourceType);
-  }
+  static Future<void> sync() async {
+    _busy = true;
+    stateNotifier.value++;
 
-  static Future<void> sync(int syncBitMask) async {
-    // 分区存储下 .dsf/.dff 等无 MIME 注册的文件对仅持 READ_MEDIA_AUDIO
-    // 的应用不可见（目录遍历都列不出来），扫描本地文件夹前请求所有文件
-    // 访问权限；拒绝则维持现状（只能扫到常见音频格式）
-    if (Platform.isAndroid &&
-        (syncBitMask & 1) == 1 &&
-        library.localFolderList.isNotEmpty) {
-      await Permission.manageExternalStorage.request();
+    if (viewModeNotifier.value == .normal) {
+      layersManager.clearDataLayers();
     }
 
-    _syncing = true;
-    syncStateNotifier.value++;
+    globalPictureList = [];
 
-    artistAlbumManager.clear();
+    artistAlbumManager = ArtistAlbumManager();
 
-    if ((syncBitMask & 1) == 1) {
-      await _prepareForSync(.local);
-    }
+    history = History();
 
-    if ((syncBitMask & 2) == 2) {
-      await _prepareForSync(.webdav);
-    }
-
-    if ((syncBitMask & 4) == 4) {
-      await _prepareForSync(.subsonic);
-    }
-
-    if ((syncBitMask & 8) == 8) {
-      await _prepareForSync(.navidrome);
-    }
-
-    if ((syncBitMask & 16) == 16) {
-      await _prepareForSync(.emby);
-    }
-
-    if ((syncBitMask & 1) == 1) {
-      await _sync(.local);
-    }
-
-    if ((syncBitMask & 2) == 2) {
-      await _sync(.webdav);
-    }
-
-    if ((syncBitMask & 4) == 4) {
-      await _sync(.subsonic);
-    }
-
-    if ((syncBitMask & 8) == 8) {
-      await _sync(.navidrome);
-    }
-
-    if ((syncBitMask & 16) == 16) {
-      await _sync(.emby);
-    }
+    await library.sync();
 
     await audioHandler.sync();
 
-    artistAlbumManager.classify();
+    history.load();
 
-    _syncing = false;
-    syncStateNotifier.value++;
+    await playlistManager.load();
+
+    if (isNotStreamSource) {
+      artistAlbumManager.classify();
+    }
+
+    _busy = false;
+    stateNotifier.value++;
+  }
+
+  static Future<void> firstSync() async {
+    _busy = true;
+    stateNotifier.value++;
+
+    layersManager.switchRootLayer('songs');
+
+    artistAlbumManager = ArtistAlbumManager();
+
+    history = History();
+
+    await library.sync();
+
+    await audioHandler.loadStates();
+
+    history.load();
+
+    await playlistManager.load();
+
+    if (isNotStreamSource) {
+      artistAlbumManager.classify();
+    }
+
+    _busy = false;
+    stateNotifier.value++;
   }
 
   static void _handleLegacyVersionData() {
     File tmp = File('${appSupportDir.path}/version.json');
-    tmp.writeAsStringSync(jsonEncode(versionNumber));
-
-    for (final sourceType in SourceType.values) {
-      File tmpPlaylistFile = File(
-        "${getPlaylistConfigPath(sourceType)}/particle_music_playlists.json",
-      );
-      if (tmpPlaylistFile.existsSync()) {
-        tmpPlaylistFile.rename(
-          '${getPlaylistConfigPath(sourceType)}/sylvakru_playlists.json',
+    if (tmp.existsSync()) {
+      firstLaunch = false;
+      if (compareVersion('4.0.1', jsonDecode(tmp.readAsStringSync())) > 0) {
+        File playlistsFile = File(
+          "${getPlaylistConfigPath(.local)}/sylvakru_playlists.json",
         );
+        if (playlistsFile.existsSync()) {
+          final content = playlistsFile.readAsStringSync();
+          final list = jsonDecode(content) as List;
+          if (list.isNotEmpty && list[0] == 'Favorite') {
+            playlistsFile.writeAsStringSync(jsonEncode(list.skip(1).toList()));
+          }
+        }
+
+        playlistsFile = File(
+          "${getPlaylistConfigPath(.webdav)}/sylvakru_playlists.json",
+        );
+        if (playlistsFile.existsSync()) {
+          final content = playlistsFile.readAsStringSync();
+          final list = jsonDecode(content) as List;
+          if (list.isNotEmpty && list[0] == 'Favorite') {
+            playlistsFile.writeAsStringSync(jsonEncode(list.skip(1).toList()));
+          }
+        }
+
+        // 保留旧来源目录中的下载缓存及待迁移队列元数据。
       }
     }
+    tmp.writeAsStringSync(jsonEncode(versionNumber));
   }
 }

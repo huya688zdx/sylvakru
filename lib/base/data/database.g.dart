@@ -29,15 +29,6 @@ class $MetadataItemsTable extends MetadataItems
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
-  @override
-  late final GeneratedColumnWithTypeConverter<SourceType, String> sourceType =
-      GeneratedColumn<String>(
-        'source_type',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<SourceType>($MetadataItemsTable.$convertersourceType);
   static const VerificationMeta _formatMeta = const VerificationMeta('format');
   @override
   late final GeneratedColumn<String> format = GeneratedColumn<String>(
@@ -234,7 +225,6 @@ class $MetadataItemsTable extends MetadataItems
   List<GeneratedColumn> get $columns => [
     id,
     modified,
-    sourceType,
     format,
     title,
     artist,
@@ -424,12 +414,6 @@ class $MetadataItemsTable extends MetadataItems
         DriftSqlType.int,
         data['${effectivePrefix}modified'],
       ),
-      sourceType: $MetadataItemsTable.$convertersourceType.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}source_type'],
-        )!,
-      ),
       format: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}format'],
@@ -513,15 +497,11 @@ class $MetadataItemsTable extends MetadataItems
   $MetadataItemsTable createAlias(String alias) {
     return $MetadataItemsTable(attachedDatabase, alias);
   }
-
-  static JsonTypeConverter2<SourceType, String, String> $convertersourceType =
-      const EnumNameConverter<SourceType>(SourceType.values);
 }
 
 class MetadataItem extends DataClass implements Insertable<MetadataItem> {
   final String id;
   final int? modified;
-  final SourceType sourceType;
   final String? format;
   final String? title;
   final String? artist;
@@ -544,7 +524,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
   const MetadataItem({
     required this.id,
     this.modified,
-    required this.sourceType,
     this.format,
     this.title,
     this.artist,
@@ -571,11 +550,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
     map['id'] = Variable<String>(id);
     if (!nullToAbsent || modified != null) {
       map['modified'] = Variable<int>(modified);
-    }
-    {
-      map['source_type'] = Variable<String>(
-        $MetadataItemsTable.$convertersourceType.toSql(sourceType),
-      );
     }
     if (!nullToAbsent || format != null) {
       map['format'] = Variable<String>(format);
@@ -645,7 +619,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
       modified: modified == null && nullToAbsent
           ? const Value.absent()
           : Value(modified),
-      sourceType: Value(sourceType),
       format: format == null && nullToAbsent
           ? const Value.absent()
           : Value(format),
@@ -708,9 +681,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
     return MetadataItem(
       id: serializer.fromJson<String>(json['id']),
       modified: serializer.fromJson<int?>(json['modified']),
-      sourceType: $MetadataItemsTable.$convertersourceType.fromJson(
-        serializer.fromJson<String>(json['sourceType']),
-      ),
       format: serializer.fromJson<String?>(json['format']),
       title: serializer.fromJson<String?>(json['title']),
       artist: serializer.fromJson<String?>(json['artist']),
@@ -746,9 +716,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
       'modified': serializer.toJson<int?>(modified),
-      'sourceType': serializer.toJson<String>(
-        $MetadataItemsTable.$convertersourceType.toJson(sourceType),
-      ),
       'format': serializer.toJson<String?>(format),
       'title': serializer.toJson<String?>(title),
       'artist': serializer.toJson<String?>(artist),
@@ -778,7 +745,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
   MetadataItem copyWith({
     String? id,
     Value<int?> modified = const Value.absent(),
-    SourceType? sourceType,
     Value<String?> format = const Value.absent(),
     Value<String?> title = const Value.absent(),
     Value<String?> artist = const Value.absent(),
@@ -801,7 +767,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
   }) => MetadataItem(
     id: id ?? this.id,
     modified: modified.present ? modified.value : this.modified,
-    sourceType: sourceType ?? this.sourceType,
     format: format.present ? format.value : this.format,
     title: title.present ? title.value : this.title,
     artist: artist.present ? artist.value : this.artist,
@@ -834,9 +799,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
     return MetadataItem(
       id: data.id.present ? data.id.value : this.id,
       modified: data.modified.present ? data.modified.value : this.modified,
-      sourceType: data.sourceType.present
-          ? data.sourceType.value
-          : this.sourceType,
       format: data.format.present ? data.format.value : this.format,
       title: data.title.present ? data.title.value : this.title,
       artist: data.artist.present ? data.artist.value : this.artist,
@@ -878,7 +840,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
     return (StringBuffer('MetadataItem(')
           ..write('id: $id, ')
           ..write('modified: $modified, ')
-          ..write('sourceType: $sourceType, ')
           ..write('format: $format, ')
           ..write('title: $title, ')
           ..write('artist: $artist, ')
@@ -906,7 +867,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
   int get hashCode => Object.hashAll([
     id,
     modified,
-    sourceType,
     format,
     title,
     artist,
@@ -933,7 +893,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
       (other is MetadataItem &&
           other.id == this.id &&
           other.modified == this.modified &&
-          other.sourceType == this.sourceType &&
           other.format == this.format &&
           other.title == this.title &&
           other.artist == this.artist &&
@@ -958,7 +917,6 @@ class MetadataItem extends DataClass implements Insertable<MetadataItem> {
 class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
   final Value<String> id;
   final Value<int?> modified;
-  final Value<SourceType> sourceType;
   final Value<String?> format;
   final Value<String?> title;
   final Value<String?> artist;
@@ -982,7 +940,6 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
   const MetadataItemsCompanion({
     this.id = const Value.absent(),
     this.modified = const Value.absent(),
-    this.sourceType = const Value.absent(),
     this.format = const Value.absent(),
     this.title = const Value.absent(),
     this.artist = const Value.absent(),
@@ -1007,7 +964,6 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
   MetadataItemsCompanion.insert({
     required String id,
     this.modified = const Value.absent(),
-    required SourceType sourceType,
     this.format = const Value.absent(),
     this.title = const Value.absent(),
     this.artist = const Value.absent(),
@@ -1028,12 +984,10 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
     this.playCount = const Value.absent(),
     this.lastPlayed = const Value.absent(),
     this.rowid = const Value.absent(),
-  }) : id = Value(id),
-       sourceType = Value(sourceType);
+  }) : id = Value(id);
   static Insertable<MetadataItem> custom({
     Expression<String>? id,
     Expression<int>? modified,
-    Expression<String>? sourceType,
     Expression<String>? format,
     Expression<String>? title,
     Expression<String>? artist,
@@ -1058,7 +1012,6 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (modified != null) 'modified': modified,
-      if (sourceType != null) 'source_type': sourceType,
       if (format != null) 'format': format,
       if (title != null) 'title': title,
       if (artist != null) 'artist': artist,
@@ -1089,7 +1042,6 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
   MetadataItemsCompanion copyWith({
     Value<String>? id,
     Value<int?>? modified,
-    Value<SourceType>? sourceType,
     Value<String?>? format,
     Value<String?>? title,
     Value<String?>? artist,
@@ -1114,7 +1066,6 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
     return MetadataItemsCompanion(
       id: id ?? this.id,
       modified: modified ?? this.modified,
-      sourceType: sourceType ?? this.sourceType,
       format: format ?? this.format,
       title: title ?? this.title,
       artist: artist ?? this.artist,
@@ -1148,11 +1099,6 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
     }
     if (modified.present) {
       map['modified'] = Variable<int>(modified.value);
-    }
-    if (sourceType.present) {
-      map['source_type'] = Variable<String>(
-        $MetadataItemsTable.$convertersourceType.toSql(sourceType.value),
-      );
     }
     if (format.present) {
       map['format'] = Variable<String>(format.value);
@@ -1230,7 +1176,6 @@ class MetadataItemsCompanion extends UpdateCompanion<MetadataItem> {
     return (StringBuffer('MetadataItemsCompanion(')
           ..write('id: $id, ')
           ..write('modified: $modified, ')
-          ..write('sourceType: $sourceType, ')
           ..write('format: $format, ')
           ..write('title: $title, ')
           ..write('artist: $artist, ')
@@ -1271,7 +1216,6 @@ typedef $$MetadataItemsTableCreateCompanionBuilder =
     MetadataItemsCompanion Function({
       required String id,
       Value<int?> modified,
-      required SourceType sourceType,
       Value<String?> format,
       Value<String?> title,
       Value<String?> artist,
@@ -1297,7 +1241,6 @@ typedef $$MetadataItemsTableUpdateCompanionBuilder =
     MetadataItemsCompanion Function({
       Value<String> id,
       Value<int?> modified,
-      Value<SourceType> sourceType,
       Value<String?> format,
       Value<String?> title,
       Value<String?> artist,
@@ -1337,12 +1280,6 @@ class $$MetadataItemsTableFilterComposer
   ColumnFilters<int> get modified => $composableBuilder(
     column: $table.modified,
     builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnWithTypeConverterFilters<SourceType, SourceType, String>
-  get sourceType => $composableBuilder(
-    column: $table.sourceType,
-    builder: (column) => ColumnWithTypeConverterFilters(column),
   );
 
   ColumnFilters<String> get format => $composableBuilder(
@@ -1460,11 +1397,6 @@ class $$MetadataItemsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get sourceType => $composableBuilder(
-    column: $table.sourceType,
-    builder: (column) => ColumnOrderings(column),
-  );
-
   ColumnOrderings<String> get format => $composableBuilder(
     column: $table.format,
     builder: (column) => ColumnOrderings(column),
@@ -1576,12 +1508,6 @@ class $$MetadataItemsTableAnnotationComposer
   GeneratedColumn<int> get modified =>
       $composableBuilder(column: $table.modified, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<SourceType, String> get sourceType =>
-      $composableBuilder(
-        column: $table.sourceType,
-        builder: (column) => column,
-      );
-
   GeneratedColumn<String> get format =>
       $composableBuilder(column: $table.format, builder: (column) => column);
 
@@ -1687,7 +1613,6 @@ class $$MetadataItemsTableTableManager
               ({
                 Value<String> id = const Value.absent(),
                 Value<int?> modified = const Value.absent(),
-                Value<SourceType> sourceType = const Value.absent(),
                 Value<String?> format = const Value.absent(),
                 Value<String?> title = const Value.absent(),
                 Value<String?> artist = const Value.absent(),
@@ -1711,7 +1636,6 @@ class $$MetadataItemsTableTableManager
               }) => MetadataItemsCompanion(
                 id: id,
                 modified: modified,
-                sourceType: sourceType,
                 format: format,
                 title: title,
                 artist: artist,
@@ -1737,7 +1661,6 @@ class $$MetadataItemsTableTableManager
               ({
                 required String id,
                 Value<int?> modified = const Value.absent(),
-                required SourceType sourceType,
                 Value<String?> format = const Value.absent(),
                 Value<String?> title = const Value.absent(),
                 Value<String?> artist = const Value.absent(),
@@ -1761,7 +1684,6 @@ class $$MetadataItemsTableTableManager
               }) => MetadataItemsCompanion.insert(
                 id: id,
                 modified: modified,
-                sourceType: sourceType,
                 format: format,
                 title: title,
                 artist: artist,

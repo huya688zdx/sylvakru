@@ -1,36 +1,34 @@
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:sylvakru/base/app.dart';
+import 'package:sylvakru/base/data/artist_album.dart';
+import 'package:sylvakru/base/data/playlist.dart';
+import 'package:sylvakru/base/my_audio_metadata.dart';
+import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/logger.dart';
-import 'package:sylvakru/base/services/network_error_reporter.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 
-EmbyClient? embyClient;
-
-class EmbyClient {
-  final String baseUrl;
-  final String username;
-  final String password;
-
-  late final Dio dio;
-
+class EmbyClient extends StreamClient {
   String? accessToken;
   String? userId;
 
+  late String _libraryId;
+
   EmbyClient({
-    required this.baseUrl,
-    required this.username,
-    required this.password,
+    required super.baseUrl,
+    required super.username,
+    required super.password,
   }) {
     dio = Dio(
       BaseOptions(
         baseUrl: _normalizeBaseUrl(baseUrl),
-        connectTimeout: const Duration(seconds: 5),
-        receiveTimeout: const Duration(seconds: 10),
-        sendTimeout: const Duration(seconds: 10),
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 15),
+        sendTimeout: const Duration(seconds: 15),
         headers: {
           'Content-Type': 'application/json',
           'X-Emby-Authorization':
-              'MediaBrowser Client="Sylvakru", Device="Flutter", DeviceId="sylvakru", Version="1.0.0"',
+              'MediaBrowser Client="Sylvakru", Device="Flutter", DeviceId="sylvakru", Version="$versionNumber"',
         },
       ),
     );
@@ -42,7 +40,6 @@ class EmbyClient {
     if (url.endsWith('/')) {
       return url.substring(0, url.length - 1);
     }
-
     return url;
   }
 
@@ -53,215 +50,283 @@ class EmbyClient {
           if (accessToken != null) {
             options.headers['X-Emby-Token'] = accessToken;
           }
-
           handler.next(options);
         },
       ),
     );
   }
 
-  Future<T?> _safeRequest<T>(
-    Future<Response> Function() request,
-    T? Function(Response response) parser,
-  ) async {
+  @protected
+  Future<T?> safeRequest<T>(
+    Future<Response> Function() request, {
+    T? Function(Response response)? parser,
+    String errorMessage = '',
+    bool showRealError = false,
+  }) async {
     try {
-      final response = await request();
-
-      return parser(response);
-    } on DioException catch (e) {
-      logger.output(
-        '[Emby] Dio error: ${e.message} '
-        '(${e.response?.statusCode})',
-      );
-
-      if (e.response?.data != null) {
-        logger.output(e.response!.data.toString());
+      if (accessToken == null && userId == null) {
+        final loggedIn = await login();
+        if (!loggedIn) {
+          return null;
+        }
       }
 
-      reportNetworkError('$runtimeType', 'network error');
+      final response = await request();
+
+      if (response.statusCode != null &&
+          response.statusCode! >= 200 &&
+          response.statusCode! < 300) {
+        if (parser != null) {
+          return parser(response);
+        }
+        return response.data as T?;
+      }
+
+      return null;
+    } on DioException catch (e) {
+      logger.output(
+        '\n[$runtimeType]\n[error]Dio: ${e.message} (${e.response?.statusCode}\n[data]${e.response?.data.toString()})',
+      );
+
+      if (errorMessage.isNotEmpty) {
+        showCenterMessage(errorMessage, duration: 3000);
+      }
 
       return null;
     } catch (e) {
-      logger.output('[Emby] Unknown error: $e');
+      logger.output('\n[$runtimeType]\n[error]$e');
 
-      reportNetworkError('$runtimeType', 'network error');
+      if (errorMessage.isNotEmpty) {
+        showCenterMessage(errorMessage, duration: 3000);
+      }
 
       return null;
     }
   }
 
-  Future<bool> _boolRequest(Future<Response> Function() request) async {
-    return await _safeRequest(request, (_) => true) ?? false;
-  }
-
-  /// Login
+  /// Perform login and save user info and default music library
   Future<bool> login() async {
-    final result = await _safeRequest(
-      () => dio.post(
+    try {
+      final response = await dio.post(
         '/Users/AuthenticateByName',
         data: {'Username': username, 'Pw': password},
-      ),
-      (response) {
-        accessToken = response.data['AccessToken'];
-        userId = response.data['User']['Id'];
+      );
 
-        return true;
-      },
-    );
+      accessToken = response.data['AccessToken'];
+      userId = response.data['User']['Id'];
 
-    return result ?? false;
+      final libraries = await _getMusicLibraries();
+      if (libraries.isNotEmpty) {
+        _libraryId = libraries.first['Id'];
+      } else {
+        _libraryId = '';
+      }
+
+      return true;
+    } catch (e) {
+      showCenterMessage('[$runtimeType] Login failed');
+      logger.output('[$runtimeType] Login failed: $e');
+      return false;
+    }
   }
 
+  @override
   Future<bool> ping() async {
-    final result = await _safeRequest(
+    final result = await safeRequest<dynamic>(
       () => dio.get('/System/Info/Public'),
-      (response) => response.statusCode == 200,
+      showRealError: true,
     );
-
-    return result ?? false;
+    return result != null;
   }
 
   /// Get all libraries
-  Future<List<dynamic>> getLibraries() async {
-    final result = await _safeRequest(
+  Future<List<dynamic>> _getLibraries() async {
+    final result = await safeRequest<List<dynamic>>(
       () => dio.get('/Users/$userId/Views'),
-      (response) => response.data['Items'] as List<dynamic>,
+      parser: (response) => response.data['Items'] as List<dynamic>?,
     );
-
     return result ?? [];
   }
 
   /// Get music libraries only
-  Future<List<dynamic>> getMusicLibraries() async {
+  Future<List<dynamic>> _getMusicLibraries() async {
     try {
-      final libraries = await getLibraries();
-
-      return libraries.where((e) {
-        return e['CollectionType'] == 'music';
-      }).toList();
+      final libraries = await _getLibraries();
+      return libraries.where((e) => e['CollectionType'] == 'music').toList();
     } catch (e) {
-      logger.output('[Emby] Get music libraries error: $e');
+      logger.output('[$runtimeType] Get music libraries error: $e');
       return [];
     }
   }
 
-  Stream<List<Map<String, dynamic>>> getAllSongs({int limit = 50}) async* {
-    final libraries = await getMusicLibraries();
-
-    if (libraries.isEmpty) {
-      return;
-    }
-
-    final libraryId = libraries.first['Id'];
-
-    int startIndex = 0;
-    int cnt = 0;
-
-    while (true) {
-      final items = await _safeRequest(
-        () => dio.get(
-          '/Users/$userId/Items',
-          queryParameters: {
-            'ParentId': libraryId,
-            'Recursive': true,
-            'IncludeItemTypes': 'Audio',
-
-            'StartIndex': startIndex,
-            'Limit': limit,
-
-            'Fields':
-                'Id,Name,Album,Artists,AlbumArtist,RunTimeTicks,Genres,ProductionYear,IndexNumber,ParentIndexNumber,MediaSources,UserData',
-
-            'EnableImages': false,
-          },
-        ),
-        (response) {
-          return (response.data['Items'] as List).cast<Map<String, dynamic>>();
+  @override
+  Future<List<Artist>?> getArtistList() async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get(
+        '/Artists',
+        queryParameters: {
+          'ParentId': _libraryId,
+          'StartIndex': 0,
+          'Limit': 500,
+          'SortBy': 'SortName',
         },
-      );
-
-      if (items == null || items.isEmpty) {
-        break;
-      }
-
-      yield items;
-
-      cnt += items.length;
-      startIndex += limit;
-
-      logger.output('[Emby] Fetched $cnt songs...');
-    }
-  }
-
-  /// Audio stream URL
-  String audioUrl(String songId) {
-    return '${dio.options.baseUrl}/Audio/$songId/stream'
-        '?UserId=$userId&api_key=$accessToken&static=true';
-  }
-
-  Future<Uint8List?> getPictureBytes(String itemId) async {
-    return _safeRequest(
-      () => dio.get<List<int>>(
-        '/Items/$itemId/Images/Primary',
-        options: Options(responseType: ResponseType.bytes),
       ),
-      (response) {
-        return Uint8List.fromList(response.data!);
-      },
+      parser: (res) => res.data as Map<String, dynamic>?,
     );
+
+    if (response == null) {
+      return null;
+    }
+
+    final artistList = <Artist>[];
+    final items = normalize(response['Items']) ?? [];
+
+    for (final map in items) {
+      final name = map['Name'] ?? '';
+      final id = map['Id']?.toString();
+      artistList.add(Artist(name, id: id, coverArtId: id));
+    }
+
+    return artistList;
   }
 
-  Future<bool> downloadSong({
-    required String itemId,
-    required String savePath,
-    CancelToken? cancelToken,
-    int resumeFrom = 0,
+  @override
+  Future<List<MyAudioMetadata>?> getArtistSongs(String id) async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get(
+        '/Users/$userId/Items',
+        queryParameters: {
+          'ArtistIds': id,
+          'IncludeItemTypes': 'Audio',
+          'Recursive': true,
+          'SortBy': 'SortName',
+        },
+      ),
+      parser: (res) => res.data as Map<String, dynamic>?,
+    );
+
+    if (response == null) {
+      return null;
+    }
+
+    return (normalize(response['Items']) ?? [])
+        .map((e) => MyAudioMetadata.fromMap(e, .emby))
+        .toList();
+  }
+
+  @override
+  Future<List<Album>?> getAlbumList(
+    int offset, {
+    String type = 'SortName',
   }) async {
-    // 断点续传：从已下载长度带 Range 追加写入；只放行 206，服务器忽略
-    // Range 返 200 时在写文件前就报错，避免整段内容被追加损坏文件
-    if (resumeFrom > 0) {
-      try {
-        await dio.download(
-          '/Items/$itemId/Download',
-          savePath,
-          queryParameters: {'api_key': accessToken},
-          cancelToken: cancelToken,
-          deleteOnError: false,
-          fileAccessMode: FileAccessMode.append,
-          options: Options(
-            receiveTimeout: const Duration(seconds: 15),
-            headers: {'range': 'bytes=$resumeFrom-'},
-            validateStatus: (status) => status == 206,
-          ),
-        );
-        return true;
-      } on DioException catch (e) {
-        if (e.type != DioExceptionType.badResponse) {
-          logger.output(
-            '[Emby] Resume download error: ${e.message} '
-            '(${e.response?.statusCode})',
-          );
-          // 网络类失败：保留已下载部分，等上层重试继续续传
-          return false;
-        }
-        // 服务器不支持 Range：退回整文件重下
-      }
-    }
-    return _boolRequest(
-      () => dio.download(
-        '/Items/$itemId/Download',
-        savePath,
-        queryParameters: {'api_key': accessToken},
-        cancelToken: cancelToken,
-        deleteOnError: false,
-        // 分片间隔超时：失速及时报错交给上层重试，不限制整首下载总时长
-        options: Options(receiveTimeout: const Duration(seconds: 15)),
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get(
+        '/Users/$userId/Items',
+        queryParameters: {
+          'ParentId': _libraryId,
+          'IncludeItemTypes': 'MusicAlbum',
+          'Recursive': true,
+          'StartIndex': offset,
+          'Limit': 500,
+          'SortBy': type,
+        },
       ),
+      parser: (res) => res.data as Map<String, dynamic>?,
     );
+
+    if (response == null) {
+      return null;
+    }
+
+    final albumList = <Album>[];
+    final items = normalize(response['Items']) ?? [];
+    for (final map in items) {
+      final name = map['Name'] ?? '';
+      final id = map['Id']?.toString() ?? '';
+      albumList.add(
+        artistAlbumManager.albumMap.putIfAbsent(
+          id,
+          () => Album(
+            name,
+            id: id,
+            coverArtId: map['ImageTags']?['Primary'] ?? id,
+          ),
+        ),
+      );
+    }
+
+    return albumList;
   }
 
-  Future<List<String>> getFavoriteSongIds() async {
-    final result = await _safeRequest(
+  @override
+  Future<List<MyAudioMetadata>?> getAlbumSongs(String id) async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get(
+        '/Users/$userId/Items',
+        queryParameters: {
+          'ParentId': id,
+          'IncludeItemTypes': 'Audio',
+          'Recursive': true,
+          'SortBy': 'ParentIndexNumber,IndexNumber',
+        },
+      ),
+      parser: (res) => res.data as Map<String, dynamic>?,
+    );
+
+    if (response == null) {
+      return null;
+    }
+
+    return (normalize(response['Items']) ?? [])
+        .map((e) => MyAudioMetadata.fromMap(e, .emby))
+        .toList();
+  }
+
+  @override
+  Future<List<MyAudioMetadata>?> searchSongs(
+    String query,
+    int size,
+    int offset,
+  ) async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get(
+        '/Users/$userId/Items',
+        queryParameters: {
+          'SearchTerm': query,
+          'IncludeItemTypes': 'Audio',
+          'Recursive': true,
+          'StartIndex': offset,
+          'Limit': size,
+          'Fields':
+              'Id,Name,Album,AlbumId,Artists,ArtistItems,AlbumArtist,RunTimeTicks,Genres,ProductionYear,IndexNumber,ParentIndexNumber,MediaSources,UserData',
+        },
+      ),
+      parser: (res) => res.data as Map<String, dynamic>?,
+    );
+
+    if (response == null) {
+      return null;
+    }
+
+    return (normalize(response['Items']) ?? [])
+        .map((e) => MyAudioMetadata.fromMap(e, .emby))
+        .toList();
+  }
+
+  @override
+  Future<List<MyAudioMetadata>?> getSongs(int size, int offset) async {
+    final songs = await searchSongs('', size, offset);
+
+    if (songs != null) {
+      logger.output('[Emby] Fetched ${offset + songs.length} songs...');
+    }
+
+    return songs;
+  }
+
+  @override
+  Future<List<MyAudioMetadata>?> getStarredSongs() async {
+    final response = await safeRequest<Map<String, dynamic>>(
       () => dio.get(
         '/Users/$userId/Items',
         queryParameters: {
@@ -270,107 +335,277 @@ class EmbyClient {
           'Filters': 'IsFavorite',
         },
       ),
-      (response) {
-        return (response.data['Items'] as List)
-            .map((e) => e['Id'].toString())
-            .toList();
-      },
+      parser: (res) => res.data as Map<String, dynamic>?,
     );
 
-    return result ?? [];
+    if (response == null) {
+      return null;
+    }
+
+    return (normalize(response['Items']) ?? [])
+        .map((e) => MyAudioMetadata.fromMap(e, .emby))
+        .toList();
   }
 
-  Future<bool> clearFavorites() async {
-    try {
-      final ids = await getFavoriteSongIds();
+  @override
+  Future<bool> updateStarredSongs(List<String> songIds) async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get(
+        '/Users/$userId/Items',
+        queryParameters: {
+          'IncludeItemTypes': 'Audio',
+          'Recursive': true,
+          'Filters': 'IsFavorite',
+        },
+      ),
+      parser: (res) => res.data as Map<String, dynamic>?,
+    );
 
-      for (final id in ids) {
-        final success = await _boolRequest(
-          () => dio.delete('/Users/$userId/FavoriteItems/$id'),
-        );
-
-        if (!success) {
-          return false;
-        }
-      }
-
-      return true;
-    } catch (e) {
-      logger.output('[Emby] Clear favorites error: $e');
+    if (response == null) {
       return false;
     }
-  }
 
-  Future<bool> rebuildFavorites(List<String> songIds) async {
-    try {
-      final cleared = await clearFavorites();
+    final oldSongIds = (normalize(response['Items']) ?? [])
+        .map((e) => e['Id'].toString())
+        .toList();
 
-      if (!cleared) {
+    for (final id in oldSongIds) {
+      final res = await safeRequest<dynamic>(
+        () => dio.delete('/Users/$userId/FavoriteItems/$id'),
+      );
+      if (res == null) {
         return false;
       }
-
-      for (final id in songIds) {
-        final success = await _boolRequest(
-          () => dio.post('/Users/$userId/FavoriteItems/$id'),
-        );
-
-        if (!success) {
-          return false;
-        }
-      }
-
-      return true;
-    } catch (e) {
-      logger.output('[Emby] Rebuild favorites error: $e');
-      return false;
     }
+
+    for (final id in songIds) {
+      final res = await safeRequest<dynamic>(
+        () => dio.post('/Users/$userId/FavoriteItems/$id'),
+      );
+      if (res == null) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
-  Future<List<dynamic>> getPlaylists() async {
-    final result = await _safeRequest(
+  @override
+  Future<List<MyAudioMetadata>?> getPlaylistSongs(String playlistId) async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get('/Playlists/$playlistId/Items'),
+      parser: (res) => res.data as Map<String, dynamic>?,
+    );
+
+    if (response == null) {
+      return null;
+    }
+
+    return (normalize(response['Items']) ?? [])
+        .map((e) => MyAudioMetadata.fromMap(e, .emby))
+        .toList();
+  }
+
+  @override
+  Future<String?> createPlaylist(String name) async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.post(
+        '/Playlists',
+        queryParameters: {'Name': name, 'Ids': '', 'MediaType': 'Audio'},
+      ),
+      parser: (res) => res.data as Map<String, dynamic>?,
+    );
+
+    return response?['Id']?.toString();
+  }
+
+  @override
+  Future<bool> deletePlaylist(String playlistId) async {
+    return await safeRequest<dynamic>(() => dio.delete('/Items/$playlistId')) !=
+        null;
+  }
+
+  @override
+  Future<List<Playlist>?> getPlaylists() async {
+    final response = await safeRequest<Map<String, dynamic>>(
       () => dio.get(
         '/Users/$userId/Items',
         queryParameters: {'IncludeItemTypes': 'Playlist', 'Recursive': true},
       ),
-      (response) {
-        return response.data['Items'] as List<dynamic>;
-      },
+      parser: (res) => res.data as Map<String, dynamic>?,
     );
 
-    return result ?? [];
+    return (normalize(
+      response?['Items'],
+    ))?.map((e) => Playlist(name: e['Name'], id: e['Id'].toString())).toList();
   }
 
-  Future<List<String>> getPlaylistItems(String playlistId) async {
-    final result = await _safeRequest(
+  @override
+  Future<bool> updatePlaylistSongs(
+    String playlistId,
+    List<String> songIds,
+  ) async {
+    final oldSongs = await getPlaylistSongs(playlistId);
+    if (oldSongs == null) {
+      return false;
+    }
+
+    final response = await safeRequest<Map<String, dynamic>>(
       () => dio.get('/Playlists/$playlistId/Items'),
-      (response) {
-        return (response.data['Items'] as List)
-            .map((e) => e['Id'].toString())
-            .toList();
-      },
+      parser: (res) => res.data as Map<String, dynamic>?,
     );
 
-    return result ?? [];
+    if (response != null) {
+      final rawItems = normalize(response['Items']) ?? [];
+      final oldEntryIds = rawItems
+          .map((e) => e['PlaylistItemId']?.toString() ?? e['Id']?.toString())
+          .whereType<String>()
+          .toList();
+
+      if (oldEntryIds.isNotEmpty) {
+        final res = await safeRequest<dynamic>(
+          () => dio.delete(
+            '/Playlists/$playlistId/Items',
+            queryParameters: {'EntryIds': oldEntryIds.join(',')},
+          ),
+        );
+        if (res == null) {
+          return false;
+        }
+      }
+    }
+
+    if (songIds.isNotEmpty) {
+      final res = await safeRequest<dynamic>(
+        () => dio.post(
+          '/Playlists/$playlistId/Items',
+          queryParameters: {'Ids': songIds.join(',')},
+        ),
+      );
+      if (res == null) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
-  Future<String?> createPlaylist({
-    required String name,
-    required List<String> songIds,
-  }) async {
-    return _safeRequest(
-      () => dio.post(
-        '/Playlists',
-        queryParameters: {
-          'Name': name,
-          'Ids': songIds.join(','),
-          'MediaType': 'Audio',
-        },
+  @override
+  String getStreamUrl(String id) {
+    return '${dio.options.baseUrl}/Audio/$id/stream'
+        '?UserId=$userId&api_key=$accessToken&static=true';
+  }
+
+  @override
+  Future<Uint8List?> getPictureBytes(String id) async {
+    return safeRequest<Uint8List>(
+      () => dio.get<List<int>>(
+        '/Items/$id/Images/Primary',
+        options: Options(responseType: ResponseType.bytes),
       ),
-      (response) => response.data['Id']?.toString(),
+      parser: (res) => Uint8List.fromList(res.data as List<int>),
     );
   }
 
-  Future<bool> deletePlaylist(String playlistId) async {
-    return _boolRequest(() => dio.delete('/Items/$playlistId'));
+  @override
+  Future<String> getLyricsById(String songId) async {
+    final response = await safeRequest<Map<String, dynamic>>(
+      () => dio.get('/Audio/$songId/RemoteSearch/Lyrics'),
+      parser: (res) => res.data as Map<String, dynamic>?,
+    );
+
+    if (response == null) {
+      return '';
+    }
+
+    final lyricsData = response['Lyrics'];
+
+    if (lyricsData is List) {
+      final buffer = StringBuffer();
+      for (final line in lyricsData) {
+        final startTicks = line['Start'] ?? 0;
+        final value = line['Text'] ?? '';
+
+        final totalMs = (startTicks / 10000).round();
+
+        final minute = (totalMs ~/ 60000).toString().padLeft(2, '0');
+        final second = ((totalMs % 60000) ~/ 1000).toString().padLeft(2, '0');
+        final milli = (totalMs % 1000).toString().padLeft(3, '0');
+
+        buffer.writeln('[$minute:$second.$milli]$value');
+      }
+      return buffer.toString();
+    }
+
+    return '';
+  }
+
+  @override
+  Future<bool> downloadSong(
+    String songId,
+    String savePath, {
+    CancelToken? cancelToken,
+    int resumeFrom = 0,
+  }) async {
+    try {
+      // 只接受 206 追加部分文件；不支持 Range 时退回整首下载。
+      if (resumeFrom > 0) {
+        try {
+          await dio.download(
+            '/Items/$songId/Download',
+            savePath,
+            queryParameters: {'api_key': accessToken},
+            cancelToken: cancelToken,
+            deleteOnError: false,
+            fileAccessMode: FileAccessMode.append,
+            options: Options(
+              receiveTimeout: const Duration(seconds: 15),
+              headers: {'range': 'bytes=$resumeFrom-'},
+              validateStatus: (status) => status == 206,
+            ),
+          );
+          return true;
+        } on DioException catch (e) {
+          if (e.type != DioExceptionType.badResponse) rethrow;
+        }
+      }
+      await dio.download(
+        '/Items/$songId/Download',
+        savePath,
+        queryParameters: {'api_key': accessToken},
+        cancelToken: cancelToken,
+        deleteOnError: false,
+        options: Options(receiveTimeout: const Duration(seconds: 15)),
+      );
+      return true;
+    } on DioException catch (e) {
+      if (!CancelToken.isCancel(e)) {
+        logger.output('[$runtimeType] Download failed: ${e.message}');
+      }
+      return false;
+    } catch (e) {
+      logger.output('[$runtimeType] Download failed: $e');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> scrobble(String songId) async {
+    final response = await safeRequest<dynamic>(
+      () => dio.post('/Users/$userId/PlayedItems/$songId'),
+      errorMessage: 'Failed to scrobble',
+    );
+
+    return response != null;
+  }
+
+  @override
+  Future<List<Album>?> getArtistAlbumList(String id) async {
+    return null;
+  }
+
+  @override
+  Future<Album?> getAlbum(String id) async {
+    return null;
   }
 }

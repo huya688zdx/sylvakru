@@ -1,22 +1,29 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/audio_handler.dart';
+import 'package:sylvakru/base/data/config.dart';
+import 'package:sylvakru/base/data/library.dart';
+import 'package:sylvakru/base/data/loader.dart';
+import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/keyboard.dart';
-import 'package:sylvakru/base/services/network_error_reporter.dart';
+import 'package:sylvakru/base/services/system_ui_service.dart';
+import 'package:sylvakru/base/services/taskbar_service.dart';
 import 'package:sylvakru/base/utils/dynamic_lyrics_page_route.dart';
 import 'package:sylvakru/base/utils/media_query.dart';
+import 'package:sylvakru/base/utils/source_type.dart';
+import 'package:sylvakru/base/widgets/connect_client_widget.dart';
+import 'package:sylvakru/base/widgets/manage_music_folders.dart';
 import 'package:sylvakru/big_picture_view/big_picture_view.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/landscape_view/landscape_view.dart';
 import 'package:sylvakru/landscape_view/sidebar.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/layer/lyrics_page_layer.dart';
-import 'package:sylvakru/layer/premium_layer.dart';
 import 'package:sylvakru/mini_view/mini_view.dart';
 import 'package:sylvakru/portrait_view/portrait_view.dart';
 
@@ -31,26 +38,6 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
   bool systemCanPop = false;
   Timer? _exitTimer;
   int keyValue = 0;
-  SystemUiMode? _appliedUiMode;
-
-  // 系统 UI 模式只在目标变化时应用，不能放在 build 里每次重设：全面屏手势
-  // 上滑时系统临时显示系统栏 → insets 变化触发重建 → 立刻又把栏藏回去，
-  // 返回桌面的手势被打断（平板宽屏沉浸模式下上滑卡住回不了桌面）。
-  void _applySystemUiMode(SystemUiMode mode) {
-    if (_appliedUiMode == mode) {
-      return;
-    }
-    _appliedUiMode = mode;
-    if (mode == SystemUiMode.manual) {
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: [SystemUiOverlay.top],
-      );
-    } else {
-      SystemChrome.setEnabledSystemUIMode(mode);
-    }
-  }
-
   @override
   void initState() {
     super.initState();
@@ -68,32 +55,17 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (Platform.isIOS) {
-        if (trialRemainingMinNotifier.value > 0) {
-          showCenterMessage(
-            context,
-            AppLocalizations.of(
-              context,
-            ).trialRemainingStatus(trialRemainingMinNotifier.value),
-            duration: 5000,
-          );
+        if (!firstLaunch) {
+          await Future.delayed(Duration(milliseconds: 500));
+          await NativeMenu.init();
         }
-        await NativeMenu.init();
+        await NativeMenu.initIcons();
       } else if (Platform.isMacOS) {
         await NativeMenu.initIcons();
+      } else if (Platform.isWindows) {
+        setupTaskbar();
       }
     });
-
-    networkErrorNotifier.addListener(_onNetworkError);
-  }
-
-  // Server clients report failures here since they have no BuildContext of
-  // their own; this is the single place that turns that into something the
-  // user actually sees, instead of the failure only ever reaching the log.
-  void _onNetworkError() {
-    final message = lastNetworkErrorMessage;
-    if (message != null && mounted) {
-      showCenterMessage(context, message, duration: 3000);
-    }
   }
 
   @override
@@ -101,7 +73,6 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
     if (Platform.isAndroid) {
       WidgetsBinding.instance.removeObserver(this);
     }
-    networkErrorNotifier.removeListener(_onNetworkError);
     super.dispose();
   }
 
@@ -111,12 +82,7 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
       if (state == .resumed) {
         systemCanPop = false;
         _exitTimer?.cancel();
-        // 回到前台系统可能已恢复系统栏，重新应用一次当前 UI 模式
-        final uiMode = _appliedUiMode;
-        if (uiMode != null) {
-          _appliedUiMode = null;
-          _applySystemUiMode(uiMode);
-        }
+        applySystemUiMode(forceApply: true);
         // rebuild PopScope to allow it to handle pop
         setState(() {
           keyValue++;
@@ -154,7 +120,7 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
         } else {
           systemCanPop = true;
           if (context.mounted) {
-            showCenterMessage(context, AppLocalizations.of(context).tapAgain);
+            showCenterMessage(AppLocalizations.of(context).tapAgain);
           }
           _exitTimer = Timer(const Duration(seconds: 2), () {
             systemCanPop = false;
@@ -166,6 +132,9 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
   }
 
   Widget view() {
+    if (firstLaunch) {
+      return firstLaunchView();
+    }
     return ValueListenableBuilder(
       valueListenable: viewModeNotifier,
       builder: (context, viewMode, child) {
@@ -173,18 +142,264 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
           return MiniView();
         }
         if (viewMode == .bigPicture) {
-          _applySystemUiMode(SystemUiMode.immersiveSticky);
-          return BigPictureView();
+          applySystemUiMode(
+            mode: immersiveWideLayoutNotifier.value
+                ? .immersiveSticky
+                : .edgeToEdge,
+          );
+
+          if (immersiveWideLayoutNotifier.value) {
+            return BigPictureView();
+          }
+          SystemChrome.setSystemUIOverlayStyle(
+            const SystemUiOverlayStyle(
+              statusBarIconBrightness: Brightness.light,
+            ),
+          );
+          return SafeArea(child: BigPictureView());
         }
         if (isTooNarrow(context)) {
-          _applySystemUiMode(SystemUiMode.manual);
+          applySystemUiMode(mode: .manual);
           return PortraitView();
         }
         // immersiveSticky：上滑临时显示的系统栏是透明浮层、不派发 insets
         // 变化也会自动隐藏，全面屏手势可正常完成；immersive 被唤出后会常驻
-        _applySystemUiMode(SystemUiMode.immersiveSticky);
-        return LandscapeView();
+        applySystemUiMode(
+          mode: immersiveWideLayoutNotifier.value
+              ? .immersiveSticky
+              : .edgeToEdge,
+        );
+
+        if (immersiveWideLayoutNotifier.value) {
+          return LandscapeView();
+        }
+        SystemChrome.setSystemUIOverlayStyle(
+          const SystemUiOverlayStyle(statusBarIconBrightness: Brightness.light),
+        );
+        return SafeArea(child: LandscapeView());
       },
+    );
+  }
+
+  Widget firstLaunchView() {
+    final l10n = AppLocalizations.of(context);
+
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 600;
+
+              return CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: EdgeInsets.only(
+                      left: 20,
+                      right: 20,
+                      top: MediaQuery.of(context).padding.top == 0
+                          ? 20
+                          : MediaQuery.of(context).padding.top,
+                      bottom: 20,
+                    ),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+                        Center(
+                          child: Text(
+                            l10n.chooseMusicSource,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 24,
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 30),
+                    sliver: isCompact
+                        ? SliverGrid(
+                            delegate: SliverChildListDelegate([
+                              _buildSourceCard(
+                                thisSourceType: .local,
+                                color: iconColor.value,
+                              ),
+                              _buildSourceCard(
+                                thisSourceType: .webdav,
+                                color: iconColor.value,
+                              ),
+                              _buildSourceCard(thisSourceType: .navidrome),
+                              _buildSourceCard(thisSourceType: .emby),
+                            ]),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 2,
+                                  mainAxisSpacing: 5,
+                                  crossAxisSpacing: 5,
+                                ),
+                          )
+                        : SliverToBoxAdapter(
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: _buildSourceCard(
+                                    thisSourceType: .local,
+                                    color: iconColor.value,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _buildSourceCard(
+                                    thisSourceType: .webdav,
+
+                                    color: iconColor.value,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _buildSourceCard(
+                                    thisSourceType: .navidrome,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _buildSourceCard(
+                                    thisSourceType: .emby,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+
+                  const SliverToBoxAdapter(child: SizedBox(height: 10)),
+
+                  if (sourceType != .local) ...[
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 30),
+                      sliver: SliverToBoxAdapter(
+                        child: Card(
+                          child: ConnectClientWidget(
+                            key: ValueKey(sourceType),
+                            sourceType: sourceType,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 10)),
+                  ],
+
+                  if (isNotStreamSource) ...[
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 30),
+                      sliver: SliverToBoxAdapter(
+                        child: Card(
+                          child: ManageMusicFolders(key: ValueKey(sourceType)),
+                        ),
+                      ),
+                    ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 10)),
+                  ],
+
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 30),
+                    sliver: SliverToBoxAdapter(
+                      child: Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          mouseCursor: SystemMouseCursors.click,
+                          onTap: () async {
+                            setState(() {
+                              firstLaunch = false;
+                            });
+
+                            if (Platform.isIOS) {
+                              WidgetsBinding.instance.addPostFrameCallback((
+                                _,
+                              ) async {
+                                await NativeMenu.init();
+                              });
+                            }
+
+                            config.save();
+                            await Loader.firstSync();
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
+                            child: Center(child: Text(l10n.getStart)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  SliverToBoxAdapter(child: SizedBox(height: 40)),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSourceCard({required SourceType thisSourceType, Color? color}) {
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
+          onTap: () async {
+            sourceType = thisSourceType;
+            isStreamSource = sourceType == .navidrome || sourceType == .emby;
+            isNotStreamSource = !isStreamSource;
+            library = Library();
+            if (isNotStreamSource) {
+              await library.initFolders();
+            }
+            if (mounted) {
+              setState(() {});
+            }
+          },
+          child: Stack(
+            children: [
+              Transform.scale(
+                scale: 0.6,
+                child: Center(
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Image(
+                          image: getSourceTypeImage(thisSourceType),
+                          color: color,
+                        ),
+                      ),
+                      Text(
+                        getSourceTypeDisplayName(
+                          AppLocalizations.of(context),
+                          thisSourceType,
+                        ),
+                        style: .new(fontSize: 24),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              if (sourceType == thisSourceType)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Icon(Icons.check_circle, color: Colors.black),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

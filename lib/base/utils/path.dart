@@ -3,9 +3,15 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:sylvakru/base/app.dart';
-import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
+
+void setIOSFileProviderStorageIfNeed(String? iosPath) {
+  if (iosFileProviderStorage == null && iosPath != null) {
+    final tmp = iosPath.split('File Provider Storage/').first;
+    iosFileProviderStorage = "${tmp}File Provider Storage/";
+  }
+}
 
 bool isFileProviderStorePath(String path) {
   return path.contains('File Provider Storage/');
@@ -26,10 +32,10 @@ String revertIOSPath(String path) {
   if (path.startsWith('Sylvakru')) {
     return "${appDocsDir.parent.path}/${path.replaceFirst('Sylvakru', 'Documents')}";
   } else {
-    if (library.iosFileProviderStorage == null) {
+    if (iosFileProviderStorage == null) {
       return '';
     }
-    return library.iosFileProviderStorage! + path;
+    return iosFileProviderStorage! + path;
   }
 }
 
@@ -116,7 +122,7 @@ String getPicturesPath(SourceType sourceType) {
 
 final _httpClient = http.Client();
 
-Future<String?> convertToRealPathIfNeed(String path) async {
+Future<String?> covertToRedirectPathIfNeed(String path) async {
   final uri = Uri.tryParse(path);
   if (uri == null ||
       !(uri.isScheme('http') || uri.isScheme('https')) ||
@@ -132,9 +138,9 @@ Future<String?> convertToRealPathIfNeed(String path) async {
   final response = await _httpClient.send(request);
 
   if (response.statusCode == 302) {
-    final realLocation = response.headers['location'];
-    if (realLocation != null) {
-      return realLocation;
+    final redirectLocation = response.headers['location'];
+    if (redirectLocation != null) {
+      return redirectLocation;
     }
   }
   return null;

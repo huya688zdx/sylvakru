@@ -10,8 +10,8 @@
   "disc": "Disc",
   "lyrics": "Lyrics",
   "folder": "Folder",
-  "ranking": "Ranking",
-  "recently": "Recents",
+  "ranking": "Most Played",
+  "recently": "Recently Played",
   "artists": "Artists",
   "albums": "Albums",
   "folders": "Folders",
@@ -130,9 +130,7 @@
   "cancel": "Cancel",
   "confirm": "Confirm",
   "addFolder": "Add Folder",
-  "addRecursiveFolder": "Add Folder(Recursive)",
-  "addWebDAVFolder": "Add WebDAV Folder",
-  "addWebDAVRecursiveFolder": "Add WebDAV Folder(Recursive)",
+  "addRecursiveFolder": "Add Folder and All Subfolders",
   "replacePicture": "Replace Picture",
   "unknown": "Unknown",
   "updateMedata": "Update Metadata",
@@ -173,12 +171,8 @@
   "darkMode": "Dark Mode",
   "customMode": "Custom Mode",
   "local": "Local",
-  "switch_": "Switch",
-  "connect2Navidrome": "Connect to Navidrome",
-  "connect2Subsonic": "Connect to Subsonic",
-  "connect2WebDAV": "Connect to WebDAV",
-  "connect2Emby": "Connect to Emby",
-  "connect2Server": "Connect to Server",
+  "switchSource": "Switch Source",
+  "manageServers": "Manage Servers",
   "username": "Username",
   "password": "Password",
   "exportLog": "Export Log",
@@ -430,7 +424,8 @@
   "lyricsParseFailed": "Lyrics parsing failed",
   "switchMode": "Switch Mode",
   "viewLog": "View Log",
-  "trialRemainingStatus": "Premium trial active\n{count} min remaining",
+  "premiumTrialActive": "Premium Trial Active",
+  "trialRemainingStatus": "You have {count} min of Premium access remaining\nPurchase Premium to continue after your trial ends",
   "@trialRemainingStatus": {
     "placeholders": {
       "count": {
@@ -438,7 +433,17 @@
       }
     }
   },
+  "gotIt": "Got it",
   "trialRemaining": "Trial Remaining",
   "bigPictureMode": "Big Picture Mode",
-  "bigPictureModeDescription": "Unlock Big Picture Mode"
+  "bigPictureModeDescription": "Unlock Big Picture Mode",
+  "adjustLyrics": "Adjust Lyrics",
+  "fontSize": "Font Size",
+  "fontWeight": "Font Weight",
+  "offset": "Offset",
+  "getStart": "Get Start",
+  "immersiveWideLayout": "Immersive for Wide Layout",
+  "menuOnRight": "Open Menu from Right",
+  "save": "Save",
+  "chooseMusicSource": "Choose a Music Source"
 }

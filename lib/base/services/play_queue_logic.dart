@@ -1,3 +1,4 @@
+import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 
 /// The result of moving a song within/into the play queue: where the
@@ -37,7 +38,11 @@ class PlayQueueLogic {
         return QueueInsertResult(currentIndex, false);
       }
     } else {
-      playQueue.insert(currentIndex + 1, song);
+      if (playQueue.isEmpty) {
+        playQueue.add(song);
+      } else {
+        playQueue.insert(currentIndex + 1, song);
+      }
       return QueueInsertResult(currentIndex, true);
     }
   }

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/asset_images.dart';
@@ -174,7 +174,7 @@ class _MiniViewState extends State<MiniView> {
                   fit: StackFit.expand,
 
                   children: [
-                    CoverArtWidget(song: currentSong),
+                    CoverArtWidget(picture: currentSong?.picture),
 
                     if (displayOverlay || miniViewDisplayBottom)
                       Positioned(
@@ -370,7 +370,7 @@ class _MiniViewState extends State<MiniView> {
         builder: (context, foregroundColor, child) {
           return ListTile(
             leading: CoverArtWidget(
-              song: currentSong,
+              picture: currentSong?.picture,
               size: 50,
               borderRadius: 5,
             ),
@@ -544,7 +544,7 @@ class _MiniViewState extends State<MiniView> {
 
               IconButton(
                 onPressed: () async {
-                  showCenterMessage(context, 'Desktop lyrics has been removed');
+                  showCenterMessage('Desktop lyrics has been removed');
                 },
                 icon: const ImageIcon(desktopLyricsImage, size: 25),
 

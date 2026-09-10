@@ -167,13 +167,13 @@ abstract class AppLocalizations {
   /// No description provided for @ranking.
   ///
   /// In en, this message translates to:
-  /// **'Ranking'**
+  /// **'Most Played'**
   String get ranking;
 
   /// No description provided for @recently.
   ///
   /// In en, this message translates to:
-  /// **'Recents'**
+  /// **'Recently Played'**
   String get recently;
 
   /// No description provided for @artists.
@@ -593,20 +593,8 @@ abstract class AppLocalizations {
   /// No description provided for @addRecursiveFolder.
   ///
   /// In en, this message translates to:
-  /// **'Add Folder(Recursive)'**
+  /// **'Add Folder and All Subfolders'**
   String get addRecursiveFolder;
-
-  /// No description provided for @addWebDAVFolder.
-  ///
-  /// In en, this message translates to:
-  /// **'Add WebDAV Folder'**
-  String get addWebDAVFolder;
-
-  /// No description provided for @addWebDAVRecursiveFolder.
-  ///
-  /// In en, this message translates to:
-  /// **'Add WebDAV Folder(Recursive)'**
-  String get addWebDAVRecursiveFolder;
 
   /// No description provided for @replacePicture.
   ///
@@ -848,41 +836,17 @@ abstract class AppLocalizations {
   /// **'Local'**
   String get local;
 
-  /// No description provided for @switch_.
+  /// No description provided for @switchSource.
   ///
   /// In en, this message translates to:
-  /// **'Switch'**
-  String get switch_;
+  /// **'Switch Source'**
+  String get switchSource;
 
-  /// No description provided for @connect2Navidrome.
+  /// No description provided for @manageServers.
   ///
   /// In en, this message translates to:
-  /// **'Connect to Navidrome'**
-  String get connect2Navidrome;
-
-  /// No description provided for @connect2Subsonic.
-  ///
-  /// In en, this message translates to:
-  /// **'Connect to Subsonic'**
-  String get connect2Subsonic;
-
-  /// No description provided for @connect2WebDAV.
-  ///
-  /// In en, this message translates to:
-  /// **'Connect to WebDAV'**
-  String get connect2WebDAV;
-
-  /// No description provided for @connect2Emby.
-  ///
-  /// In en, this message translates to:
-  /// **'Connect to Emby'**
-  String get connect2Emby;
-
-  /// No description provided for @connect2Server.
-  ///
-  /// In en, this message translates to:
-  /// **'Connect to Server'**
-  String get connect2Server;
+  /// **'Manage Servers'**
+  String get manageServers;
 
   /// No description provided for @username.
   ///
@@ -2168,11 +2132,23 @@ abstract class AppLocalizations {
   /// **'View Log'**
   String get viewLog;
 
+  /// No description provided for @premiumTrialActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Premium Trial Active'**
+  String get premiumTrialActive;
+
   /// No description provided for @trialRemainingStatus.
   ///
   /// In en, this message translates to:
-  /// **'Premium trial active\n{count} min remaining'**
+  /// **'You have {count} min of Premium access remaining\nPurchase Premium to continue after your trial ends'**
   String trialRemainingStatus(int count);
+
+  /// No description provided for @gotIt.
+  ///
+  /// In en, this message translates to:
+  /// **'Got it'**
+  String get gotIt;
 
   /// No description provided for @trialRemaining.
   ///
@@ -2191,6 +2167,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Unlock Big Picture Mode'**
   String get bigPictureModeDescription;
+
+  /// No description provided for @adjustLyrics.
+  ///
+  /// In en, this message translates to:
+  /// **'Adjust Lyrics'**
+  String get adjustLyrics;
+
+  /// No description provided for @fontSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Font Size'**
+  String get fontSize;
+
+  /// No description provided for @fontWeight.
+  ///
+  /// In en, this message translates to:
+  /// **'Font Weight'**
+  String get fontWeight;
+
+  /// No description provided for @offset.
+  ///
+  /// In en, this message translates to:
+  /// **'Offset'**
+  String get offset;
+
+  /// No description provided for @getStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Get Start'**
+  String get getStart;
+
+  /// No description provided for @immersiveWideLayout.
+  ///
+  /// In en, this message translates to:
+  /// **'Immersive for Wide Layout'**
+  String get immersiveWideLayout;
+
+  /// No description provided for @menuOnRight.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Menu from Right'**
+  String get menuOnRight;
+
+  /// No description provided for @save.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get save;
+
+  /// No description provided for @chooseMusicSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a Music Source'**
+  String get chooseMusicSource;
 }
 
 class _AppLocalizationsDelegate

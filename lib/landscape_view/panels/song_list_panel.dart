@@ -22,11 +22,11 @@ extension _SongListPanel on _SongListState {
               if (currentSongNotifier.value == null) {
                 return;
               }
-              final index = currentSongListNotifier.value.indexOf(
-                currentSongNotifier.value!,
+              final index = currentSongListNotifier.value.indexWhere(
+                (e) => currentSongNotifier.value!.id == e.id,
               );
               if (index == -1) {
-                showCenterMessage(context, 'Current song not found');
+                showCenterMessage('Current song not found');
                 return;
               }
               final displayIndex = albumStructureActive
@@ -77,6 +77,14 @@ extension _SongListPanel on _SongListState {
           sliver: ValueListenableBuilder(
             valueListenable: currentSongListNotifier,
             builder: (context, currentSongList, child) {
+              if (prepareing) {
+                return SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: CircularProgressIndicator(color: iconColor.value),
+                  ),
+                );
+              }
               if (albumStructureActive) {
                 return SliverList.builder(
                   itemCount: albumGroupStarts.length,
@@ -135,7 +143,7 @@ extension _SongListPanel on _SongListState {
                   }
                   return ReorderableDragStartListener(
                     key: ValueKey(currentSongList[index]),
-                    enabled: !isFixed,
+                    enabled: !isFixed & canModify,
                     index: index,
                     child: songListItem(index),
                   );
@@ -146,11 +154,11 @@ extension _SongListPanel on _SongListState {
                   songList.insert(newIndex, item);
 
                   if (isLibrary) {
-                    library.update(sourceType);
+                    library.update();
                   } else if (folder != null) {
                     folder!.update();
                   } else {
-                    playlist!.update(getSourceTypeBitMask(sourceType));
+                    playlist!.update();
                   }
                 },
               );
@@ -192,7 +200,10 @@ extension _SongListPanel on _SongListState {
                     subtitle: ValueListenableBuilder(
                       valueListenable: currentSongListNotifier,
                       builder: (context, currentSongList, child) {
-                        String prefix = getSourceTypeName(l10n, sourceType);
+                        String prefix = getSourceTypeDisplayName(
+                          l10n,
+                          sourceType,
+                        );
                         return Text(
                           "$prefix: ${l10n.songCount(currentSongList.length)}",
                         );
@@ -250,7 +261,6 @@ extension _SongListPanel on _SongListState {
                   ListenableBuilder(
                     listenable: Listenable.merge([
                       buttonColor.valueNotifier,
-                      if (folder == null) songListManager.changeNotifier,
                       if (albumStructureSupported) albumStructureNotifier,
                     ]),
                     builder: (_, _) {
@@ -268,17 +278,14 @@ extension _SongListPanel on _SongListState {
                           children: [
                             SizedBox(width: 10),
                             ElevatedButton(
-                              onPressed: () async {
+                              onPressed: () {
                                 if (currentSongListNotifier.value.isEmpty) {
                                   return;
                                 }
-                                audioHandler.currentIndex = 0;
-                                playModeNotifier.value = 0;
-                                await audioHandler.setPlayQueue(
+                                audioHandler.setPlayQueue(
                                   currentSongListNotifier.value,
+                                  0,
                                 );
-                                await audioHandler.load();
-                                audioHandler.play();
                               },
                               style: buttonStyle,
                               child: Text(l10n.playAll),
@@ -286,19 +293,15 @@ extension _SongListPanel on _SongListState {
 
                             SizedBox(width: 15),
                             ElevatedButton(
-                              onPressed: () async {
+                              onPressed: () {
                                 if (currentSongListNotifier.value.isEmpty) {
                                   return;
                                 }
-                                audioHandler.currentIndex = Random().nextInt(
-                                  currentSongListNotifier.value.length,
-                                );
-                                playModeNotifier.value = 1;
-                                await audioHandler.setPlayQueue(
+
+                                audioHandler.setPlayQueue(
                                   currentSongListNotifier.value,
+                                  1,
                                 );
-                                await audioHandler.load();
-                                audioHandler.play();
                               },
                               style: buttonStyle,
                               child: Text(l10n.shuffle),
@@ -308,19 +311,31 @@ extension _SongListPanel on _SongListState {
                               SizedBox(width: 15),
                               ElevatedButton(
                                 onPressed: () {
+                                  for (var e in isSelectedNotifierMap.values) {
+                                    e.value = false;
+                                  }
                                   Navigator.of(
                                     context,
                                     rootNavigator: true,
                                   ).push(
                                     MaterialPageRoute(
-                                      builder: (_) => SelectableSongListPage(
-                                        songList: songList,
-                                        playlist: playlist,
-                                        folder: folder,
-                                        isRanking: isRanking,
-                                        isRecently: isRecently,
-                                        isLibrary: isLibrary,
-                                        reorderable: reorderable,
+                                      builder: (_) => ValueListenableBuilder(
+                                        valueListenable:
+                                            currentSongListNotifier,
+                                        builder:
+                                            (context, currentSongList, child) {
+                                              return SelectableSongListPage(
+                                                songList: currentSongList,
+                                                playlist: playlist,
+                                                folder: folder,
+                                                isRanking: isRanking,
+                                                isRecently: isRecently,
+                                                isLibrary: isLibrary,
+                                                reorderable: reorderable,
+                                                isSelectedNotifierMap:
+                                                    isSelectedNotifierMap,
+                                              );
+                                            },
                                       ),
                                     ),
                                   );
@@ -330,27 +345,8 @@ extension _SongListPanel on _SongListState {
                               ),
                             ],
 
-                            if (folder == null &&
-                                songListManager.notEmptyCount >= 2) ...[
-                              SizedBox(width: 15),
-                              ElevatedButton(
-                                onPressed: () {
-                                  showSwitchDialogIfNeed(
-                                    context,
-                                    songListManager,
-                                  );
-                                },
-                                style: buttonStyle,
-                                child: Text(l10n.switch_),
-                              ),
-                            ],
-
-                            if ((isLibrary &&
-                                        (sourceType == .local ||
-                                            sourceType == .webdav) ||
-                                    folder != null) &&
-                                // 专辑结构模式固定按专辑排序，隐藏排序入口
-                                !albumStructureActive) ...[
+                            if (isLibrary && isNotStreamSource ||
+                                folder != null) ...[
                               SizedBox(width: 15),
                               ElevatedButton(
                                 onPressed: () {
@@ -358,12 +354,12 @@ extension _SongListPanel on _SongListState {
                                     context: context,
                                     child: SizedBox(
                                       width: 300,
-                                      height: isMobile ? 300 : 280,
                                       child: Padding(
                                         padding: const EdgeInsets.all(10),
                                         child: Builder(
                                           builder: (context) {
                                             return ListView(
+                                              shrinkWrap: true,
                                               children: [
                                                 ListTile(
                                                   title: Text(l10n.defaultText),
@@ -433,9 +429,7 @@ extension _SongListPanel on _SongListState {
                                                     }
                                                     sortTypeNotifier.value = 0;
                                                     if (isLibrary) {
-                                                      library.shuffle(
-                                                        sourceType,
-                                                      );
+                                                      library.shuffle();
                                                     } else {
                                                       folder!.shuffle();
                                                     }
@@ -498,7 +492,6 @@ extension _SongListPanel on _SongListState {
                       } else {
                         sortTypeNotifier.value = 0;
                       }
-                      playlist?.saveSetting();
                     }
                   : null,
               child: Padding(
@@ -553,7 +546,6 @@ extension _SongListPanel on _SongListState {
                       } else {
                         sortTypeNotifier.value = 5;
                       }
-                      playlist?.saveSetting();
                     }
                   : null,
               child: Padding(
@@ -580,10 +572,8 @@ extension _SongListPanel on _SongListState {
           ),
 
           SizedBox(
-            width: 80,
-            child: Center(
-              child: Text(l10n.favorited, overflow: TextOverflow.ellipsis),
-            ),
+            width: 60,
+            child: Icon(Icons.star_outline_rounded, size: 22),
           ),
 
           SizedBox(
@@ -602,7 +592,6 @@ extension _SongListPanel on _SongListState {
                       } else {
                         sortTypeNotifier.value = 7;
                       }
-                      playlist?.saveSetting();
                     }
                   : null,
               child: Padding(
@@ -653,7 +642,11 @@ extension _SongListPanel on _SongListState {
           SizedBox(
             width: 60,
             child: Center(
-              child: CoverArtWidget(size: 40, borderRadius: 4, song: song),
+              child: CoverArtWidget(
+                size: 40,
+                borderRadius: 4,
+                picture: song.picture,
+              ),
             ),
           ),
           Expanded(
@@ -685,11 +678,11 @@ extension _SongListPanel on _SongListState {
 
   Widget songListItem(int index) {
     final currentSongList = currentSongListNotifier.value;
-    final isSelected = isSelectedList[index];
     final song = currentSongList[index];
+    final isSelectedNotifier = isSelectedNotifierMap[song]!;
     final showPlayButtonNotifier = showPlayButtonNotifierMap[song]!;
     return ValueListenableBuilder(
-      valueListenable: isSelected,
+      valueListenable: isSelectedNotifier,
       builder: (context, value, child) {
         return ValueListenableBuilder(
           valueListenable: selectedItemColor.valueNotifier,
@@ -725,9 +718,10 @@ extension _SongListPanel on _SongListState {
                         SizedBox(
                           width: 60,
                           child: Center(
-                            child: indexOrPlayButton(
+                            child: indexOrIcon(
                               showPlayButtonNotifier,
                               index,
+                              song,
                             ),
                           ),
                         ),
@@ -745,7 +739,7 @@ extension _SongListPanel on _SongListState {
                         ),
 
                         SizedBox(
-                          width: 80,
+                          width: 60,
                           child: Center(
                             child: IconButton(
                               onPressed: () {
@@ -756,11 +750,14 @@ extension _SongListPanel on _SongListState {
                                 builder: (context, value, child) {
                                   return value
                                       ? Icon(
-                                          Icons.favorite_rounded,
+                                          Icons.star_rounded,
                                           color: Colors.red,
-                                          size: 20,
+                                          size: 22,
                                         )
-                                      : Icon(Icons.favorite_outline, size: 20);
+                                      : Icon(
+                                          Icons.star_outline_rounded,
+                                          size: 22,
+                                        );
                                 },
                               ),
                             ),
@@ -789,7 +786,7 @@ extension _SongListPanel on _SongListState {
                 ),
                 onTap: () async {
                   if (ctrlIsPressed) {
-                    isSelected.value = !isSelected.value;
+                    isSelectedNotifier.value = !isSelectedNotifier.value;
                     continuousSelectBeginIndex = index;
                   } else if (shiftIsPressed) {
                     int left = continuousSelectBeginIndex < index
@@ -799,29 +796,31 @@ extension _SongListPanel on _SongListState {
                         ? continuousSelectBeginIndex
                         : index;
 
-                    for (int i = 0; i < isSelectedList.length; i++) {
+                    for (int i = 0; i < currentSongList.length; i++) {
+                      final song = currentSongList[i];
                       if (i < left || i > right) {
-                        isSelectedList[i].value = false;
+                        isSelectedNotifierMap[song]!.value = false;
                       } else {
-                        isSelectedList[i].value = true;
+                        isSelectedNotifierMap[song]!.value = true;
                       }
                     }
                   } else {
                     // clear select
-                    for (var tmp in isSelectedList) {
+                    for (var tmp in isSelectedNotifierMap.values) {
                       tmp.value = false;
                     }
-                    isSelected.value = true;
+                    isSelectedNotifier.value = true;
                     continuousSelectBeginIndex = index;
                   }
 
                   if (isMobile || waitForSecondClick) {
                     waitForSecondClick = false;
                     doubleClicktimer?.cancel();
-                    audioHandler.currentIndex = index;
-                    await audioHandler.setPlayQueue(currentSongList);
-                    await audioHandler.load();
-                    audioHandler.play();
+                    await audioHandler.setPlayQueue(
+                      currentSongList,
+                      0,
+                      targetIndex: index,
+                    );
                   } else {
                     doubleClicktimer = Timer(Duration(milliseconds: 250), () {
                       waitForSecondClick = false;
@@ -851,23 +850,49 @@ extension _SongListPanel on _SongListState {
     );
   }
 
-  Widget indexOrPlayButton(ValueNotifier<bool> showPlayButtonNotifier, index) {
+  Widget indexOrIcon(
+    ValueNotifier<bool> showPlayButtonNotifier,
+    int index,
+    MyAudioMetadata song,
+  ) {
     return ValueListenableBuilder(
-      valueListenable: showPlayButtonNotifier,
-      builder: (context, value, child) {
-        return value
-            ? IconButton(
-                onPressed: () async {
-                  audioHandler.currentIndex = index;
-                  await audioHandler.setPlayQueue(
-                    currentSongListNotifier.value,
-                  );
-                  await audioHandler.load();
-                  audioHandler.play();
-                },
-                icon: Icon(Icons.play_arrow_rounded),
-              )
-            : Text((index + 1).toString(), overflow: TextOverflow.ellipsis);
+      valueListenable: currentSongNotifier,
+      builder: (context, currentSong, child) {
+        if (currentSong == song) {
+          return ListenableBuilder(
+            listenable: Listenable.merge([
+              isPlayingNotifier,
+              iconColor.valueNotifier,
+            ]),
+            builder: (context, child) {
+              return RiveAnimatedIcon(
+                key: ValueKey(
+                  isPlayingNotifier.value.toString() +
+                      iconColor.value.toString(),
+                ),
+                riveIcon: .sound,
+                width: 30,
+                height: 30,
+                loopAnimation: isPlayingNotifier.value,
+                color: iconColor.value,
+              );
+            },
+          );
+        }
+        return ValueListenableBuilder(
+          valueListenable: showPlayButtonNotifier,
+          builder: (context, value, child) {
+            return value
+                ? IconButton(
+                    onPressed: () {
+                      audioHandler.singlePlay(song);
+                      audioHandler.saveAllStates();
+                    },
+                    icon: Icon(Icons.play_arrow_rounded),
+                  )
+                : Text((index + 1).toString(), overflow: TextOverflow.ellipsis);
+          },
+        );
       },
     );
   }
@@ -876,7 +901,11 @@ extension _SongListPanel on _SongListState {
     return ValueListenableBuilder(
       valueListenable: currentSongNotifier,
       builder: (_, currentSong, _) {
-        final coverArt = CoverArtWidget(size: 40, borderRadius: 4, song: song);
+        final coverArt = CoverArtWidget(
+          size: 40,
+          borderRadius: 4,
+          picture: song.picture,
+        );
         return ListTile(
           contentPadding: .zero,
           visualDensity: const VisualDensity(horizontal: 0, vertical: -4),
@@ -941,48 +970,35 @@ extension _SongListPanel on _SongListState {
 
   void popContextMenu(BuildContext context, int index, Offset globalPosition) {
     final currentSongList = currentSongListNotifier.value;
-    final isSelected = isSelectedList[index];
+    final isSelectedNotifier = isSelectedNotifierMap[currentSongList[index]]!;
     // select current and clear others if it's not selected
-    if (!isSelected.value) {
-      for (var tmp in isSelectedList) {
+    if (!isSelectedNotifier.value) {
+      for (var tmp in isSelectedNotifierMap.values) {
         tmp.value = false;
       }
-      isSelected.value = true;
+      isSelectedNotifier.value = true;
       continuousSelectBeginIndex = index;
     }
 
     final selectedSongList = <MyAudioMetadata>[];
 
-    for (int i = 0; i < isSelectedList.length; i++) {
-      if (isSelectedList[i].value) {
-        selectedSongList.add(currentSongList[i]);
+    for (int i = 0; i < currentSongList.length; i++) {
+      final song = currentSongList[i];
+
+      if (isSelectedNotifierMap[song]!.value) {
+        selectedSongList.add(song);
       }
     }
 
     final l10n = AppLocalizations.of(context);
     List<MenuItem> menuItems = [];
 
-    if (selectedSongList.length == 1 &&
-        reorderable &&
-        !albumStructureActive &&
-        textController.text.isEmpty &&
-        sortTypeNotifier.value == 0) {
+    if (selectedSongList.length == 1 && reorderable) {
       menuItems.add(
         MenuItem(
           iconData: Icons.vertical_align_top_rounded,
           text: l10n.move2Top,
-          callback: () async {
-            final item = songList.removeAt(index);
-            songList.insert(0, item);
-
-            if (isLibrary) {
-              library.update(sourceType);
-            } else if (folder != null) {
-              folder!.update();
-            } else {
-              playlist!.update(getSourceTypeBitMask(item.sourceType));
-            }
-          },
+          callback: () => moveToTop(index),
         ),
       );
     }
@@ -1055,38 +1071,35 @@ extension _SongListPanel on _SongListState {
     menuItems.add(MenuItem(isDivider: true));
 
     if (selectedSongList.length == 1) {
-      menuItems.add(
-        MenuItem(
-          text: l10n.go2Artist,
-          iconData: Icons.people,
-          callback: () async {
-            final artists = getArtists(getArtist(currentSongList[index]));
-            if (artists.length > 1) {
-              showArtistEntries(context, artists);
-            } else {
-              await Future.delayed(Duration(milliseconds: 250));
-              layersManager.switchRootLayer('artists');
-              layersManager.pushDetailIfNeed(
-                artistAlbumManager.name2Artist[artists[0]],
-              );
-            }
-          },
-        ),
-      );
+      final song = selectedSongList.first;
+      if (artist == null) {
+        menuItems.add(
+          MenuItem(
+            text: l10n.go2Artist,
+            iconData: Icons.people,
+            callback: () => goToArtist(song, context),
+          ),
+        );
+      } else if (isNotStreamSource && artist!.name != song.artist) {
+        menuItems.add(
+          MenuItem(
+            text: l10n.go2Artist,
+            iconData: Icons.people,
+            callback: () =>
+                goToArtist(song, context, excludedArtist: artist!.name),
+          ),
+        );
+      }
 
-      menuItems.add(
-        MenuItem(
-          text: l10n.go2Album,
-          iconData: Icons.album_rounded,
-          callback: () async {
-            await Future.delayed(Duration(milliseconds: 250));
-            layersManager.switchRootLayer('albums');
-            layersManager.pushDetailIfNeed(
-              artistAlbumManager.name2Album[getAlbum(currentSongList[index])],
-            );
-          },
-        ),
-      );
+      if (album == null) {
+        menuItems.add(
+          MenuItem(
+            text: l10n.go2Album,
+            iconData: Icons.album_rounded,
+            callback: () => goToAlbum(song),
+          ),
+        );
+      }
 
       menuItems.add(
         MenuItem(
@@ -1095,13 +1108,13 @@ extension _SongListPanel on _SongListState {
           callback: () {
             showAnimationDialog(
               context: context,
-              child: SongInfo(song: currentSongList[index]),
+              child: SongInfo(song: song),
             );
           },
         ),
       );
 
-      if (sourceType == .local) {
+      if (sourceType == .local && artist == null && album == null) {
         menuItems.add(
           MenuItem(
             iconData: Icons.edit_rounded,
@@ -1109,7 +1122,7 @@ extension _SongListPanel on _SongListState {
             callback: () {
               showAnimationDialog(
                 context: context,
-                child: EditMetadata(song: currentSongList[index]),
+                child: EditMetadata(song: song),
               );
             },
           ),

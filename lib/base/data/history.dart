@@ -1,93 +1,77 @@
+import 'dart:async';
+
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
-import 'package:sylvakru/base/data/song_list_manager.dart';
+import 'package:sylvakru/base/data/artist_album.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
-import 'package:sylvakru/base/services/navidrome_client.dart';
 
-final History history = History();
+History history = History();
 
 class History {
-  SongListManager rankingSongListManager = SongListManager();
-  SongListManager recentlySongListManager = SongListManager();
+  final List<MyAudioMetadata> rankingSongList = [];
+  final List<MyAudioMetadata> recentlySongList = [];
+  final rankingChangeNotifier = ValueNotifier(0);
+  final recentlyChangeNotifier = ValueNotifier(0);
 
-  void _fetchSongs(
-    List<MyAudioMetadata> fromSongList,
-    List<MyAudioMetadata> toRankingSongList,
-    List<MyAudioMetadata> toRecentlySongList,
-  ) {
-    for (final song in fromSongList) {
+  final List<Album> rankingAlbumList = [];
+  final List<Album> recentlyAlbumList = [];
+
+  void load() {
+    for (final song in library.songList) {
       if (song.playCount > 0 && song.lastPlayed != null) {
-        toRankingSongList.add(song);
-        toRecentlySongList.add(song);
+        rankingSongList.add(song);
+        recentlySongList.add(song);
       }
     }
-    toRankingSongList.sort((a, b) {
+    rankingSongList.sort((a, b) {
       int tmp = b.playCount.compareTo(a.playCount);
       return tmp != 0 ? tmp : a.lastPlayed!.compareTo(b.lastPlayed!);
     });
 
-    toRecentlySongList.sort((a, b) => b.lastPlayed!.compareTo(a.lastPlayed!));
-  }
+    recentlySongList.sort((a, b) => b.lastPlayed!.compareTo(a.lastPlayed!));
 
-  void load() {
-    for (final sourceType in SourceType.values) {
-      _fetchSongs(
-        library.songListManager.getSongList2(sourceType),
-        rankingSongListManager.getSongList2(sourceType),
-        recentlySongListManager.getSongList2(sourceType),
-      );
-    }
-
-    rankingSongListManager.resetSourceType();
-    recentlySongListManager.resetSourceType();
+    rankingChangeNotifier.value++;
+    recentlyChangeNotifier.value++;
   }
 
   void _addSongTimes(MyAudioMetadata song, int times) {
-    final currentRankingSongList = rankingSongListManager.getSongList2(
-      song.sourceType,
-    );
-    int index = -1;
-    for (int i = 0; i < currentRankingSongList.length; i++) {
-      if (song == currentRankingSongList[i]) {
-        currentRankingSongList[i].playCount += times;
-        index = i;
-        break;
-      }
-    }
+    int index = rankingSongList.indexOf(song);
+
+    song.playCount += times;
 
     if (index == -1) {
-      song.playCount = times;
-      currentRankingSongList.add(song);
-      index = currentRankingSongList.length - 1;
+      rankingSongList.add(song);
+      index = rankingSongList.length - 1;
     }
 
-    final tmp = currentRankingSongList[index];
     for (int i = index - 1; i >= 0; i--) {
-      if (currentRankingSongList[i].playCount < tmp.playCount) {
-        currentRankingSongList[i + 1] = currentRankingSongList[i];
+      if (rankingSongList[i].playCount < song.playCount) {
+        rankingSongList[i + 1] = rankingSongList[i];
         index = i;
       } else {
         break;
       }
     }
-    currentRankingSongList[index] = tmp;
+    rankingSongList[index] = song;
+    rankingChangeNotifier.value++;
   }
 
   Future<void> addSongTimes(MyAudioMetadata song, int times) async {
     _addSongTimes(song, times);
 
-    if (song.sourceType == .navidrome) {
+    if (sourceType == .navidrome) {
       while (times-- > 0) {
-        await navidromeClient!.scrobble(song.id);
+        await streamClient?.scrobble(song.id);
       }
     }
 
     song.lastPlayed = DateTime.now();
-    await library.updatePlayCount(song);
-
-    rankingSongListManager.getChangeNotifier2(song.sourceType).value++;
-    rankingSongListManager.resetSourceType();
+    if (isNotStreamSource) {
+      await library.updatePlayCount(song);
+    }
 
     _add2Recently(song);
 
@@ -95,34 +79,61 @@ class History {
   }
 
   void _add2Recently(MyAudioMetadata song) {
-    final songList = recentlySongListManager.getSongList2(song.sourceType);
-    songList.remove(song);
-    songList.insert(0, song);
-    recentlySongListManager.getChangeNotifier2(song.sourceType).value++;
-    recentlySongListManager.resetSourceType();
+    recentlySongList.remove(song);
+    recentlySongList.insert(0, song);
+    recentlyChangeNotifier.value++;
   }
 
-  void clear() {
-    rankingSongListManager.clear();
-    recentlySongListManager.clear();
-  }
+  Completer<int?>? rankingCompleter;
+  Completer<int?>? recentlyCompleter;
 
-  void prepareForSync(SourceType sourceType) {
-    rankingSongListManager.prepareForSync(sourceType);
-    recentlySongListManager.prepareForSync(sourceType);
-  }
+  // null: error; 0: end
+  Future<int?> loadAlbums(bool isRanking) async {
+    if (isRanking && rankingCompleter != null) {
+      rankingChangeNotifier.value++;
+      return rankingCompleter!.future;
+    }
+    if (!isRanking && recentlyCompleter != null) {
+      recentlyChangeNotifier.value++;
+      return recentlyCompleter!.future;
+    }
 
-  void sync(SourceType sourceType) {
-    _fetchSongs(
-      library.songListManager.getSongList2(sourceType),
-      rankingSongListManager.getSongList2(sourceType),
-      recentlySongListManager.getSongList2(sourceType),
+    Completer<int?> tmpCompleter = Completer<int?>();
+
+    if (isRanking) {
+      rankingCompleter = tmpCompleter;
+    } else {
+      recentlyCompleter = tmpCompleter;
+    }
+
+    final albumList = await streamClient?.getAlbumList(
+      isRanking ? rankingAlbumList.length : recentlyAlbumList.length,
+      type: isRanking ? 'frequent' : 'recent',
     );
 
-    rankingSongListManager.getChangeNotifier2(sourceType).value++;
-    rankingSongListManager.resetSourceType();
+    if (albumList == null) {
+      tmpCompleter.complete(null);
+      if (isRanking) {
+        rankingCompleter = null;
+        rankingChangeNotifier.value++;
+      } else {
+        recentlyCompleter = null;
+        recentlyChangeNotifier.value++;
+      }
+      return null;
+    }
 
-    recentlySongListManager.getChangeNotifier2(sourceType).value++;
-    recentlySongListManager.resetSourceType();
+    if (isRanking) {
+      rankingAlbumList.addAll(albumList);
+      rankingChangeNotifier.value++;
+      rankingCompleter = null;
+    } else {
+      recentlyAlbumList.addAll(albumList);
+      recentlyChangeNotifier.value++;
+      recentlyCompleter = null;
+    }
+
+    tmpCompleter.complete(albumList.length);
+    return albumList.length;
   }
 }

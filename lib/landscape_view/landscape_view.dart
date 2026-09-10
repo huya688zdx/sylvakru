@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/widgets/blurred_cover_art_widget.dart';
@@ -25,7 +25,7 @@ class LandscapeView extends StatelessWidget {
               valueListenable: layersManager.backgroundChangeNotifier,
               builder: (context, value, child) {
                 return BlurredCoverArtWidget(
-                  song: backgroundSong,
+                  picture: backgroundPicture,
                   color: colorManager.getSpecificBgBaseColor(),
                   sigmaX: MediaQuery.widthOf(context) * 0.03,
                   sigmaY: MediaQuery.heightOf(context) * 0.03,

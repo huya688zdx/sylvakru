@@ -1,12 +1,12 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
 import 'package:sylvakru/base/utils/contrast_color_generator.dart';
 import 'package:sylvakru/layer/lyrics_page_layer.dart';
-import 'package:sylvakru/base/my_audio_metadata.dart';
 
 final colorManager = ColorManager();
 
-MyAudioMetadata? backgroundSong;
+MyPicture? backgroundPicture;
 Color backgroundCoverArtColor = Colors.grey;
 Color currentCoverArtColor = Colors.grey;
 
@@ -88,7 +88,8 @@ final MyColor bottomColor = MyColor(
 
 final MyColor searchFieldColor = MyColor(
   getVividValue: () {
-    final tmpColor = backgroundSong?.lowerLuminance ?? backgroundCoverArtColor;
+    final tmpColor =
+        backgroundPicture?.lowerLuminance ?? backgroundCoverArtColor;
     return tmpColor.withAlpha(75);
   },
   lightModeValue: Colors.grey.shade200,
@@ -97,7 +98,8 @@ final MyColor searchFieldColor = MyColor(
 
 final MyColor buttonColor = MyColor(
   getVividValue: () {
-    final tmpColor = backgroundSong?.lowerLuminance ?? backgroundCoverArtColor;
+    final tmpColor =
+        backgroundPicture?.lowerLuminance ?? backgroundCoverArtColor;
     return tmpColor.withAlpha(75);
   },
   lightModeValue: Colors.grey.shade200,
@@ -106,7 +108,7 @@ final MyColor buttonColor = MyColor(
 
 final MyColor dividerColor = MyColor(
   getVividValue: () {
-    return backgroundSong?.lowerLuminance ?? backgroundCoverArtColor;
+    return backgroundPicture?.lowerLuminance ?? backgroundCoverArtColor;
   },
   lightModeValue: Colors.grey,
   darkModeValue: Colors.grey.shade700,
@@ -114,7 +116,8 @@ final MyColor dividerColor = MyColor(
 
 final MyColor selectedItemColor = MyColor(
   getVividValue: () {
-    final tmpColor = backgroundSong?.lowerLuminance ?? backgroundCoverArtColor;
+    final tmpColor =
+        backgroundPicture?.lowerLuminance ?? backgroundCoverArtColor;
     return tmpColor.withAlpha(75);
   },
   lightModeValue: Colors.grey.shade200,
@@ -305,9 +308,9 @@ class ColorManager {
     }
   }
 
-  void updateBigPictureRelatedColors(MyAudioMetadata? song) {
-    backgroundSong = song;
-    backgroundCoverArtColor = song?.coverArtColor ?? Colors.grey;
+  void updateBigPictureRelatedColors(MyPicture? picture) {
+    backgroundPicture = picture;
+    backgroundCoverArtColor = backgroundPicture?.color ?? Colors.grey;
     searchFieldColor.updateColor();
     buttonColor.updateColor();
     dividerColor.updateColor();
@@ -322,21 +325,21 @@ class ColorManager {
     }
   }
 
-  Color? getSpecificMainPageCoverArtBaseColorForm(MyAudioMetadata? song) {
+  Color? getSpecificMainPageCoverArtBaseColorForm(MyPicture? picture) {
     return mainPageThemeNotifier.value == .vivid
-        ? song == null
+        ? picture == null
               ? Colors.grey
-              : song.coverArtColor
+              : picture.color
         : isMobile
         ? pageBackgroundColor.value
         : panelColor.value;
   }
 
-  Color? getSpecificMainPageSearchFieldColorForm(MyAudioMetadata? song) {
+  Color? getSpecificMainPageSearchFieldColorForm(MyPicture? picture) {
     return mainPageThemeNotifier.value == .vivid
-        ? song == null
+        ? picture == null
               ? Colors.grey.withAlpha(75)
-              : song.coverArtColor?.withAlpha(75)
+              : picture.color?.withAlpha(75)
         : searchFieldColor.value;
   }
 

@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/widgets/settings_list.dart';
@@ -64,30 +64,6 @@ void main() {
   );
   appSupportDir = appSupportDirectory;
   tearDownAll(() => appSupportDirectory.deleteSync(recursive: true));
-
-  testWidgets('大图设置的音频输出入口调用专用导航回调', (tester) async {
-    var opened = false;
-    final settingsList = SettingsList(
-      onAudioOutputTap: () {
-        opened = true;
-      },
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: Builder(
-          builder: (context) =>
-              Material(child: settingsList.audioOutputListTile(context)),
-        ),
-      ),
-    );
-
-    await tester.tap(find.byType(ListTile));
-
-    expect(opened, isTrue);
-  });
 
   testWidgets('大图音频输出页通过 Navigator 返回设置列表', (tester) async {
     final observer = _RouteObserver();

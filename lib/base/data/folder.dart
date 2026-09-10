@@ -2,10 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/services/bookmark_service.dart';
 import 'package:sylvakru/base/app.dart';
-import 'package:sylvakru/base/services/song_list_service.dart';
 import 'package:sylvakru/base/utils/path.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
@@ -53,6 +52,8 @@ class Folder {
 
   final changeNotifier = ValueNotifier(0);
 
+  bool canModify = false;
+
   Folder(this.id, this.path, {this.isWebdav = false}) {
     if (!isWebdav) {
       _dir = Directory(path);
@@ -61,7 +62,7 @@ class Folder {
       "${getFolderConfigPath(isWebdav ? .webdav : .local)}/${md5.convert(utf8.encode(id)).toString()}.json",
     );
     if (!_songIdListFile.existsSync()) {
-      _songIdListFile.writeAsStringSync('[]');
+      initFile(_songIdListFile, true);
     }
   }
 
@@ -74,7 +75,7 @@ class Folder {
             '${appDocsDir.parent.path}/${id.replaceFirst('Sylvakru', 'Documents')}';
       } else {
         path = await BookmarkService.getUrlById(id) ?? '';
-        library.setIOSFileProviderStorageIfNeed(path);
+        setIOSFileProviderStorageIfNeed(path);
       }
     }
 
@@ -89,7 +90,7 @@ class Folder {
         path =
             '${appDocsDir.parent.path}/${id.replaceFirst('Sylvakru', 'Documents')}';
       } else {
-        path = library.iosFileProviderStorage! + id;
+        path = iosFileProviderStorage! + id;
         if (!await BookmarkService.saveDirectoryAndActive(id, path)) {
           path = '';
         }
@@ -137,7 +138,16 @@ class Folder {
   }
 
   Future<void> load() async {
-    await loadSongList(_songIdListFile, songList);
+    final List<dynamic> songIdList = jsonDecode(
+      await _songIdListFile.readAsString(),
+    );
+    for (final id in songIdList) {
+      songList.add(library.id2Song[id]!);
+    }
+
+    canModify = true;
+    changeNotifier.value++;
+    layersManager.updateBackground();
   }
 
   Future<void> _saveSongIdList() async {
@@ -151,10 +161,10 @@ class Folder {
     update();
   }
 
-  void update() {
+  Future<void> update() async {
     changeNotifier.value++;
     layersManager.updateBackground();
-    _saveSongIdList();
+    await _saveSongIdList();
   }
 
   void delete() {
@@ -166,6 +176,7 @@ class Folder {
   }
 
   Future<void> sync() async {
+    canModify = false;
     final songIdList = await readJsonListFile(_songIdListFile);
 
     for (final id in songIdList) {
@@ -198,6 +209,9 @@ class Folder {
       }
     }
 
-    update();
+    await update();
+
+    canModify = true;
+    changeNotifier.value++;
   }
 }

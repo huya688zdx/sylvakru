@@ -42,7 +42,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get folder => '文件夹';
 
   @override
-  String get ranking => '听歌排行';
+  String get ranking => '最多播放';
 
   @override
   String get recently => '最近播放';
@@ -269,13 +269,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get addFolder => '添加文件夹';
 
   @override
-  String get addRecursiveFolder => '添加文件夹(包含子目录)';
-
-  @override
-  String get addWebDAVFolder => '添加WebDAV文件夹';
-
-  @override
-  String get addWebDAVRecursiveFolder => '添加WebDAV文件夹(包含子目录)';
+  String get addRecursiveFolder => '添加文件夹及所有子文件夹';
 
   @override
   String get replacePicture => '替换图片';
@@ -398,22 +392,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get local => '本地';
 
   @override
-  String get switch_ => '切换';
+  String get switchSource => '切换音乐来源';
 
   @override
-  String get connect2Navidrome => '连接到Navidrome';
-
-  @override
-  String get connect2Subsonic => '连接到Subsonic';
-
-  @override
-  String get connect2WebDAV => '连接到WebDAV';
-
-  @override
-  String get connect2Emby => '连接到Emby';
-
-  @override
-  String get connect2Server => '连接到服务器';
+  String get manageServers => '管理服务器';
 
   @override
   String get username => '账号';
@@ -1076,16 +1058,49 @@ class AppLocalizationsZh extends AppLocalizations {
   String get viewLog => '查看日志';
 
   @override
+  String get premiumTrialActive => '高级功能试用已开启';
+
+  @override
   String trialRemainingStatus(int count) {
-    return '高级功能试用中\n剩余 $count 分钟';
+    return '剩余试用时间：$count 分钟\n试用结束后, 购买高级功能即可继续使用';
   }
 
   @override
-  String get trialRemaining => '试用剩余时间';
+  String get gotIt => '好的';
+
+  @override
+  String get trialRemaining => '剩余试用时间';
 
   @override
   String get bigPictureMode => '大图模式';
 
   @override
   String get bigPictureModeDescription => '解锁大图模式';
+
+  @override
+  String get adjustLyrics => '调整歌词';
+
+  @override
+  String get fontSize => '字体大小';
+
+  @override
+  String get fontWeight => '字体粗细';
+
+  @override
+  String get offset => '偏移';
+
+  @override
+  String get getStart => '开始使用';
+
+  @override
+  String get immersiveWideLayout => '宽布局启用沉浸模式';
+
+  @override
+  String get menuOnRight => '从右侧弹出菜单';
+
+  @override
+  String get save => '保存';
+
+  @override
+  String get chooseMusicSource => '选择音乐来源';
 }

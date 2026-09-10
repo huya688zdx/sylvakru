@@ -42,10 +42,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get folder => 'Folder';
 
   @override
-  String get ranking => 'Ranking';
+  String get ranking => 'Most Played';
 
   @override
-  String get recently => 'Recents';
+  String get recently => 'Recently Played';
 
   @override
   String get artists => 'Artists';
@@ -269,13 +269,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get addFolder => 'Add Folder';
 
   @override
-  String get addRecursiveFolder => 'Add Folder(Recursive)';
-
-  @override
-  String get addWebDAVFolder => 'Add WebDAV Folder';
-
-  @override
-  String get addWebDAVRecursiveFolder => 'Add WebDAV Folder(Recursive)';
+  String get addRecursiveFolder => 'Add Folder and All Subfolders';
 
   @override
   String get replacePicture => 'Replace Picture';
@@ -398,22 +392,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get local => 'Local';
 
   @override
-  String get switch_ => 'Switch';
+  String get switchSource => 'Switch Source';
 
   @override
-  String get connect2Navidrome => 'Connect to Navidrome';
-
-  @override
-  String get connect2Subsonic => 'Connect to Subsonic';
-
-  @override
-  String get connect2WebDAV => 'Connect to WebDAV';
-
-  @override
-  String get connect2Emby => 'Connect to Emby';
-
-  @override
-  String get connect2Server => 'Connect to Server';
+  String get manageServers => 'Manage Servers';
 
   @override
   String get username => 'Username';
@@ -1101,9 +1083,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get viewLog => 'View Log';
 
   @override
+  String get premiumTrialActive => 'Premium Trial Active';
+
+  @override
   String trialRemainingStatus(int count) {
-    return 'Premium trial active\n$count min remaining';
+    return 'You have $count min of Premium access remaining\nPurchase Premium to continue after your trial ends';
   }
+
+  @override
+  String get gotIt => 'Got it';
 
   @override
   String get trialRemaining => 'Trial Remaining';
@@ -1113,4 +1101,31 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get bigPictureModeDescription => 'Unlock Big Picture Mode';
+
+  @override
+  String get adjustLyrics => 'Adjust Lyrics';
+
+  @override
+  String get fontSize => 'Font Size';
+
+  @override
+  String get fontWeight => 'Font Weight';
+
+  @override
+  String get offset => 'Offset';
+
+  @override
+  String get getStart => 'Get Start';
+
+  @override
+  String get immersiveWideLayout => 'Immersive for Wide Layout';
+
+  @override
+  String get menuOnRight => 'Open Menu from Right';
+
+  @override
+  String get save => 'Save';
+
+  @override
+  String get chooseMusicSource => 'Choose a Music Source';
 }

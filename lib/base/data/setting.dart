@@ -1,18 +1,29 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
-import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/usb_audio_preferences.dart';
 import 'package:sylvakru/base/widgets/lyric_list_view.dart';
-import 'package:sylvakru/base/data/artist_album.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/utils/path.dart';
 import 'package:sylvakru/base/widgets/manage_music_folders.dart';
+import 'package:sylvakru/portrait_view/portrait_view.dart';
+
+final artistsIsListViewNotifier = ValueNotifier(true);
+final artistsIsAscendingNotifier = ValueNotifier(true);
+final artistsUseLargePictureNotifier = ValueNotifier(false);
+final artistsRandomizeNotifier = ValueNotifier(false);
+
+final albumsIsAscendingNotifier = ValueNotifier(true);
+final albumsUseLargePictureNotifier = ValueNotifier(false);
+final albumsRandomizeNotifier = ValueNotifier(false);
+
+final playlistsUseLargePictureNotifier = ValueNotifier(true);
+final songsUseAlbumStructureNotifier = ValueNotifier(false);
 
 final exitOnCloseNotifier = ValueNotifier(false);
 
@@ -23,26 +34,49 @@ class Setting {
 
   Future<void> load() async {
     file = File("${appSupportDir.path}/setting.json");
-    if (!(file.existsSync())) {
-      save();
-    }
+    initFile(file, false);
 
     final json = await readJsonMapFile(file);
 
-    artistAlbumManager.loadSetting(json);
     usbAudioPreferences.load(json);
+    final legacyPlayStateFile = File('${appSupportDir.path}/play_state.json');
+    final legacyPlayState = legacyPlayStateFile.existsSync()
+        ? await readJsonMapFile(legacyPlayStateFile)
+        : <String, dynamic>{};
+    final legacyDeviceVolumes = legacyPlayState['usbExclusiveDeviceVolumes'];
+    if (legacyDeviceVolumes != null) {
+      usbAudioPreferences.loadDeviceVolumes(legacyDeviceVolumes);
+    }
+    artistsIsListViewNotifier.value =
+        json['artistsIsList'] as bool? ?? artistsIsListViewNotifier.value;
 
-    playlistManager.useLargePictureNotifier.value =
+    artistsIsAscendingNotifier.value =
+        json['artistsIsAscend'] as bool? ?? artistsIsAscendingNotifier.value;
+
+    artistsUseLargePictureNotifier.value =
+        json['artistsUseLargePicture'] as bool? ??
+        artistsUseLargePictureNotifier.value;
+
+    albumsIsAscendingNotifier.value =
+        json['albumsIsAscend'] as bool? ?? albumsIsAscendingNotifier.value;
+
+    albumsUseLargePictureNotifier.value =
+        json['albumsUseLargePicture'] as bool? ??
+        albumsUseLargePictureNotifier.value;
+
+    playlistsUseLargePictureNotifier.value =
         json['playlistsUseLargePicture'] as bool? ??
-        playlistManager.useLargePictureNotifier.value;
+        playlistsUseLargePictureNotifier.value;
+
+    endDrawerNotifier.value = json['endDrawer'] as bool? ?? Platform.isIOS;
 
     playlistManager.useAlbumStructureNotifier.value =
         json['playlistsUseAlbumStructure'] as bool? ??
         playlistManager.useAlbumStructureNotifier.value;
 
-    library.useAlbumStructureNotifier.value =
+    songsUseAlbumStructureNotifier.value =
         json['songsUseAlbumStructure'] as bool? ??
-        library.useAlbumStructureNotifier.value;
+        songsUseAlbumStructureNotifier.value;
 
     vibrationOnNoitifier.value =
         json['vibrationOn'] as bool? ?? vibrationOnNoitifier.value;
@@ -53,10 +87,15 @@ class Setting {
       localeNotifier.value = Locale(languageCode);
     }
 
+    immersiveWideLayoutNotifier.value =
+        json['immersiveWideLayout'] as bool? ?? true;
+
     autoPlayOnStartupNotifier.value =
         json['autoPlayOnStartup'] as bool? ?? false;
 
-    fontFamilyNotifier.value = json['fontFamily'] as String?;
+    if (isPremiumNotifier.value) {
+      fontFamilyNotifier.value = json['fontFamily'] as String?;
+    }
 
     mainPageThemeNotifier.value = ThemeType.values.firstWhere(
       (e) => e.name == json['mainPageTheme'],
@@ -82,25 +121,38 @@ class Setting {
         json['exitOnClose'] as bool? ?? exitOnCloseNotifier.value;
 
     recursiveScanNotifier.value = json['recursiveScan'] as bool? ?? false;
+    // DAC 音量跨来源共享，迁到现有设置文件，避免切来源时载入旧音量。
+    if (legacyDeviceVolumes != null) {
+      save();
+      legacyPlayState.remove('usbExclusiveDeviceVolumes');
+      await legacyPlayStateFile.writeAsString(jsonEncode(legacyPlayState));
+    }
   }
 
   void save() {
     file.writeAsStringSync(
       jsonEncode({
-        ...artistAlbumManager.settingToMap(),
         ...usbAudioPreferences.toMap(),
+        'artistsIsList': artistsIsListViewNotifier.value,
+        'artistsIsAscend': artistsIsAscendingNotifier.value,
+        'artistsUseLargePicture': artistsUseLargePictureNotifier.value,
 
-        'playlistsUseLargePicture':
-            playlistManager.useLargePictureNotifier.value,
+        'albumsIsAscend': albumsIsAscendingNotifier.value,
+        'albumsUseLargePicture': albumsUseLargePictureNotifier.value,
+
+        'playlistsUseLargePicture': playlistsUseLargePictureNotifier.value,
+
+        'endDrawer': endDrawerNotifier.value,
 
         'playlistsUseAlbumStructure':
             playlistManager.useAlbumStructureNotifier.value,
 
-        'songsUseAlbumStructure': library.useAlbumStructureNotifier.value,
+        'songsUseAlbumStructure': songsUseAlbumStructureNotifier.value,
 
         'vibrationOn': vibrationOnNoitifier.value,
         'language': localeNotifier.value?.languageCode,
 
+        'immersiveWideLayout': immersiveWideLayoutNotifier.value,
         'autoPlayOnStartup': autoPlayOnStartupNotifier.value,
 
         'fontFamily': fontFamilyNotifier.value,

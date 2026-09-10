@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
@@ -51,15 +51,30 @@ class Sidebar extends StatelessWidget {
             },
           );
         },
-        child: ListTile(
-          leading: leading,
-          title: Text(
-            content,
-            style: TextStyle(fontSize: 15, overflow: TextOverflow.ellipsis),
+        child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
+          child: SizedBox(
+            height: 40,
+            child: Row(
+              children: [
+                SizedBox(width: 20),
+                leading,
+                SizedBox(width: 10),
+
+                Text(
+                  content,
+                  style: TextStyle(
+                    fontSize: 15,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+
+                Spacer(),
+                if (trailing != null) ...[trailing, SizedBox(width: 5)],
+              ],
+            ),
           ),
-          contentPadding: contentPadding,
-          visualDensity: const VisualDensity(horizontal: 0, vertical: -3.65),
-          trailing: trailing,
+
           onTap: () async {
             if (closeDrawer != null) {
               closeDrawer!.call();
@@ -195,7 +210,7 @@ class Sidebar extends StatelessWidget {
                       ),
                     ),
 
-                    SliverToBoxAdapter(child: SizedBox(height: 10)),
+                    SliverToBoxAdapter(child: SizedBox(height: 5)),
                     SliverToBoxAdapter(
                       child: MyDivider(
                         thickness: 0.5,
@@ -205,7 +220,7 @@ class Sidebar extends StatelessWidget {
                         color: dividerColor,
                       ),
                     ),
-                    SliverToBoxAdapter(child: SizedBox(height: 10)),
+                    SliverToBoxAdapter(child: SizedBox(height: 5)),
 
                     SliverToBoxAdapter(
                       child: sidebarItem(
@@ -232,7 +247,7 @@ class Sidebar extends StatelessWidget {
                         },
                       ),
                     ),
-                    SliverToBoxAdapter(child: SizedBox(height: 10)),
+                    SliverToBoxAdapter(child: SizedBox(height: 5)),
                     SliverToBoxAdapter(
                       child: MyDivider(
                         thickness: 0.5,
@@ -242,7 +257,7 @@ class Sidebar extends StatelessWidget {
                         color: dividerColor,
                       ),
                     ),
-                    SliverToBoxAdapter(child: SizedBox(height: 10)),
+                    SliverToBoxAdapter(child: SizedBox(height: 5)),
 
                     SliverToBoxAdapter(
                       child: Builder(
@@ -360,10 +375,15 @@ class Sidebar extends StatelessWidget {
                         },
                       ),
                     ),
-                    SliverToBoxAdapter(child: SizedBox(height: 10)),
+                    SliverToBoxAdapter(child: SizedBox(height: 5)),
 
                     // keep Favorite at top
-                    SliverToBoxAdapter(child: playlistItem(0)),
+                    ValueListenableBuilder(
+                      valueListenable: playlistManager.updateNotifier,
+                      builder: (context, value, child) {
+                        return SliverToBoxAdapter(child: playlistItem(0));
+                      },
+                    ),
 
                     ValueListenableBuilder(
                       valueListenable: playlistManager.updateNotifier,
@@ -423,19 +443,18 @@ class Sidebar extends StatelessWidget {
           child: sidebarItem(
             label: '_${playlist.name}',
             leading: ValueListenableBuilder(
-              valueListenable: playlist.songListManager.changeNotifier,
-              builder: (_, _, _) {
+              valueListenable: playlist.changeNotifier,
+              builder: (context, value, child) {
                 final coverSong = playlist.getCoverSong();
-                if (coverSong == null) {
-                  return CoverArtWidget(size: 30, borderRadius: 3, song: null);
-                }
-                return ValueListenableBuilder(
-                  valueListenable: coverSong.updateNotifier,
-                  builder: (_, _, _) {
+                return ListenableBuilder(
+                  listenable: Listenable.merge([
+                    coverSong?.picture.changeNotifier,
+                  ]),
+                  builder: (_, _) {
                     return CoverArtWidget(
                       size: 30,
                       borderRadius: 3,
-                      song: coverSong,
+                      picture: coverSong?.picture,
                     );
                   },
                 );

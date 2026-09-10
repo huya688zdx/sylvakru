@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_gamepads/flutter_gamepads.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
@@ -81,7 +81,7 @@ class _BigPictureViewState extends State<BigPictureView> {
                 }
                 // 预模糊缓存封面，避免每帧 BackdropFilter 全屏模糊掉帧
                 return BlurredCoverArtWidget(
-                  song: currentSongNotifier.value,
+                  picture: currentSongNotifier.value?.picture,
                   color: currentCoverArtColor,
                   sigmaX: MediaQuery.widthOf(context) * 0.03,
                   sigmaY: MediaQuery.heightOf(context) * 0.03,
@@ -171,27 +171,11 @@ class _BigPictureViewState extends State<BigPictureView> {
                     }
                     await Future.delayed(Duration(milliseconds: 250));
                     viewModeNotifier.value = .normal;
-                    layersManager.updateBackground();
+                    layersManager.switchRootLayer('songs');
                   },
                   icon: ImageIcon(bigPictureModeImage),
                 ),
-              if (!isMobile && !isMaximizedNotifier.value)
-                IconButton(
-                  onPressed: () async {
-                    if (isFullScreenNotifier.value) {
-                      isFullScreenNotifier.value = false;
-                      await windowManager.setFullScreen(false);
-                    } else {
-                      isFullScreenNotifier.value = true;
-                      await windowManager.setFullScreen(true);
-                    }
-                  },
-                  icon: ImageIcon(
-                    isFullScreenNotifier.value
-                        ? fullscreenExitImage
-                        : fullscreenImage,
-                  ),
-                ),
+
               if (!isMobile && !isFullScreenNotifier.value) ...[
                 IconButton(
                   onPressed: () {
@@ -257,8 +241,33 @@ class _BigPictureViewState extends State<BigPictureView> {
                     color: Colors.transparent,
                     child: Row(
                       children: [
-                        SizedBox(width: 30),
+                        SizedBox(width: isMobile ? 10 : 20),
 
+                        if (!isMobile && !isMaximizedNotifier.value)
+                          GlassContainer(
+                            settings: LiquidGlassSettings(
+                              glassColor: glassColor.value,
+                            ),
+                            shape: const LiquidRoundedSuperellipse(
+                              borderRadius: 30,
+                            ),
+                            child: IconButton(
+                              onPressed: () async {
+                                if (isFullScreenNotifier.value) {
+                                  isFullScreenNotifier.value = false;
+                                  await windowManager.setFullScreen(false);
+                                } else {
+                                  isFullScreenNotifier.value = true;
+                                  await windowManager.setFullScreen(true);
+                                }
+                              },
+                              icon: ImageIcon(
+                                isFullScreenNotifier.value
+                                    ? fullscreenExitImage
+                                    : fullscreenImage,
+                              ),
+                            ),
+                          ),
                         // Expanded(
                         //   child: GlassContainer(
                         //     settings: LiquidGlassSettings(
@@ -292,7 +301,7 @@ class _BigPictureViewState extends State<BigPictureView> {
                   ),
                 ),
                 Expanded(
-                  flex: 2,
+                  flex: 3,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       return GlassContainer(
@@ -461,7 +470,11 @@ class _BigPictureViewState extends State<BigPictureView> {
                 child: ValueListenableBuilder(
                   valueListenable: _currentIndexNotifier,
                   builder: (context, value, child) {
-                    if (value == 0 || value == 4 || value >= 7) {
+                    if (value == 0 ||
+                        value == 4 ||
+                        value >= 7 ||
+                        (sourceType == .navidrome &&
+                            (value == 5 || value == 6))) {
                       return SizedBox.shrink();
                     }
                     return Row(
@@ -480,7 +493,7 @@ class _BigPictureViewState extends State<BigPictureView> {
                                 case 1:
                                   showSongListOptions(
                                     context,
-                                    library.songListManager,
+                                    library.songList,
                                   );
                                 case 2:
                                   showArtistsAlbumsOptions(context, true);
@@ -489,12 +502,12 @@ class _BigPictureViewState extends State<BigPictureView> {
                                 case 5:
                                   showSongListOptions(
                                     context,
-                                    history.rankingSongListManager,
+                                    history.rankingSongList,
                                   );
                                 case 6:
                                   showSongListOptions(
                                     context,
-                                    history.recentlySongListManager,
+                                    history.recentlySongList,
                                   );
                                 default:
                               }

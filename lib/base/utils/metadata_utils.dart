@@ -1,4 +1,4 @@
-import 'package:lpinyin/lpinyin.dart';
+import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/data/artist_album.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:path/path.dart';
@@ -26,10 +26,11 @@ String getArtist(MyAudioMetadata? song) {
 List<String> getArtists(String artist) {
   List<String> artists = [];
   for (String artistName in artist.split(RegExp(r'[/&,]'))) {
-    if (artistName.isEmpty) {
+    final tmp = artistName.trim();
+    if (tmp.isEmpty) {
       return [artist];
     }
-    artists.add(artistName.trim());
+    artists.add(tmp);
   }
   return artists;
 }
@@ -75,6 +76,9 @@ List<MyAudioMetadata> filterSongList(
   List<MyAudioMetadata> songList,
   String value,
 ) {
+  if (value.isEmpty) {
+    return List.from(songList);
+  }
   return songList.where((song) {
     final songTitle = getTitle(song);
     final songArtist = getArtist(song);
@@ -91,32 +95,40 @@ void sortSongList(int sortType, List<MyAudioMetadata> songList) {
   switch (sortType) {
     case 1: // Title Ascending
       songList.sort((a, b) {
-        return compareMixed(getTitle(a), getTitle(b));
+        return a.compareTitle.compareTo(b.compareTitle);
       });
       break;
     case 2: // Title Descending
       songList.sort((a, b) {
-        return compareMixed(getTitle(b), getTitle(a));
+        return b.compareTitle.compareTo(a.compareTitle);
       });
       break;
     case 3: // Artist Ascending
       songList.sort((a, b) {
-        final tmp = compareMixed(getArtist(a), getArtist(b));
+        final tmp = a.compareArtist.compareTo(b.compareArtist);
         if (tmp != 0) {
           return tmp;
         }
-        final albumA = artistAlbumManager.name2Album[getAlbum(a)];
-        final albumB = artistAlbumManager.name2Album[getAlbum(b)];
-        if (albumA != albumB) {
-          int aYear = albumA!.year ?? 9999;
-          int bYear = albumB!.year ?? 9999;
+        final albumA = artistAlbumManager
+            .albumMap[isStreamSource ? a.albumId : getAlbum(a)];
+        final albumB = artistAlbumManager
+            .albumMap[isStreamSource ? a.albumId : getAlbum(b)];
+        if (albumA == null || albumB == null) {
+          final albumTmp = a.compareAlbum.compareTo(b.compareAlbum);
+          if (albumTmp != 0) {
+            return albumTmp;
+          }
+        } else if (albumA != albumB) {
+          int aYear = albumA.year ?? 9999;
+          int bYear = albumB.year ?? 9999;
 
           final yearTmp = aYear.compareTo(bYear);
           if (yearTmp != 0) {
             return yearTmp;
           }
-          return albumA.name.compareTo(albumB.name);
+          return albumA.compareName.compareTo(albumB.compareName);
         }
+
         final discA = a.disc ?? 9999;
         final discB = b.disc ?? 9999;
 
@@ -131,21 +143,28 @@ void sortSongList(int sortType, List<MyAudioMetadata> songList) {
       break;
     case 4: // Artist Descending
       songList.sort((a, b) {
-        final tmp = compareMixed(getArtist(b), getArtist(a));
+        final tmp = b.compareArtist.compareTo(a.compareArtist);
         if (tmp != 0) {
           return tmp;
         }
-        final albumA = artistAlbumManager.name2Album[getAlbum(a)];
-        final albumB = artistAlbumManager.name2Album[getAlbum(b)];
-        if (albumA != albumB) {
-          int aYear = albumA!.year ?? 9999;
-          int bYear = albumB!.year ?? 9999;
+        final albumA = artistAlbumManager
+            .albumMap[isStreamSource ? a.albumId : getAlbum(a)];
+        final albumB = artistAlbumManager
+            .albumMap[isStreamSource ? a.albumId : getAlbum(b)];
+        if (albumA == null || albumB == null) {
+          final albumTmp = a.compareAlbum.compareTo(b.compareAlbum);
+          if (albumTmp != 0) {
+            return albumTmp;
+          }
+        } else if (albumA != albumB) {
+          int aYear = albumA.year ?? 9999;
+          int bYear = albumB.year ?? 9999;
 
           final yearTmp = aYear.compareTo(bYear);
           if (yearTmp != 0) {
             return yearTmp;
           }
-          return albumA.name.compareTo(albumB.name);
+          return albumA.compareName.compareTo(albumB.compareName);
         }
         final discA = a.disc ?? 9999;
         final discB = b.disc ?? 9999;
@@ -161,7 +180,7 @@ void sortSongList(int sortType, List<MyAudioMetadata> songList) {
       break;
     case 5: // Album Ascending
       songList.sort((a, b) {
-        final tmp = compareMixed(getAlbum(a), getAlbum(b));
+        final tmp = a.compareAlbum.compareTo(b.compareAlbum);
         if (tmp != 0) {
           return tmp;
         }
@@ -179,7 +198,7 @@ void sortSongList(int sortType, List<MyAudioMetadata> songList) {
       break;
     case 6: // Album Descending
       songList.sort((a, b) {
-        final tmp = compareMixed(getAlbum(b), getAlbum(a));
+        final tmp = b.compareAlbum.compareTo(a.compareAlbum);
         if (tmp != 0) {
           return tmp;
         }
@@ -197,11 +216,17 @@ void sortSongList(int sortType, List<MyAudioMetadata> songList) {
       break;
     case 7: // Duration Ascending
       songList.sort((a, b) {
+        if (a.duration == null || b.duration == null) {
+          return 0;
+        }
         return a.duration!.compareTo(b.duration!);
       });
       break;
     case 8: // Duration Descending
       songList.sort((a, b) {
+        if (a.duration == null || b.duration == null) {
+          return 0;
+        }
         return b.duration!.compareTo(a.duration!);
       });
       break;
@@ -219,35 +244,6 @@ void sortSongList(int sortType, List<MyAudioMetadata> songList) {
     default:
       break;
   }
-}
-
-final _englishRegExp = RegExp(r'^[A-Za-z]');
-
-bool _isEnglish(String s) {
-  final c = s[0];
-  return _englishRegExp.hasMatch(c);
-}
-
-// 拼音转换开销大，排序时每次比较都转换会把整库排序拖到秒级，
-// 按字符串缓存转换结果（字符串数量以曲库元数据为上限）
-final _pinyinCache = <String, String>{};
-
-String _pinyinOf(String s) {
-  return _pinyinCache.putIfAbsent(s, () => PinyinHelper.getPinyinE(s));
-}
-
-int compareMixed(String a, String b) {
-  final aIsEng = _isEnglish(a);
-  final bIsEng = _isEnglish(b);
-
-  if (aIsEng && !bIsEng) return -1;
-  if (!aIsEng && bIsEng) return 1;
-
-  if (aIsEng && bIsEng) {
-    return a.toLowerCase().compareTo(b.toLowerCase());
-  }
-
-  return _pinyinOf(a).compareTo(_pinyinOf(b));
 }
 
 MyAudioMetadata? getFirstSong(List<MyAudioMetadata> songList) {

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/services/exit.dart';
 import 'package:sylvakru/base/data/setting.dart';
@@ -20,6 +20,8 @@ Offset? miniPosition;
 late Size mainSize;
 late Size miniSize;
 late bool mainMaximized;
+
+bool windowIsClosed = false;
 
 class MyWindowListener extends WindowListener {
   late File windowConfigFile;
@@ -123,6 +125,7 @@ class MyWindowListener extends WindowListener {
 
   @override
   void onWindowClose() {
+    windowIsClosed = true;
     if (exitOnCloseNotifier.value) {
       exitApp();
     } else {

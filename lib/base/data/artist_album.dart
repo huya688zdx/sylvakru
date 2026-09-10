@@ -1,37 +1,43 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:lpinyin/lpinyin.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
-import 'package:sylvakru/base/data/song_list_manager.dart';
-import 'package:sylvakru/base/services/interaction.dart';
-import 'package:sylvakru/base/widgets/cover_art_widget.dart';
-import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/base/data/library.dart';
+import 'package:sylvakru/base/data/setting.dart';
+import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/utils/metadata_utils.dart';
+import 'package:sylvakru/layer/layers_manager.dart';
 
-final artistAlbumManager = ArtistAlbumManager();
+ArtistAlbumManager artistAlbumManager = ArtistAlbumManager();
 
 class ArtistAlbumManager {
   List<Artist> artistList = [];
-  Map<String, Artist> name2Artist = {};
+  Map<String, Artist> artistMap = {};
 
   List<Album> albumList = [];
-  Map<String, Album> name2Album = {};
+  // streamSoure will has duplicate name album
+  Map<String, Album> albumMap = {};
   final updateNotifier = ValueNotifier(0);
 
-  final artistsIsListViewNotifier = ValueNotifier(true);
-  final artistsIsAscendingNotifier = ValueNotifier(true);
-  final artistsUseLargePictureNotifier = ValueNotifier(false);
-  final artistsRandomizeNotifier = ValueNotifier(false);
-
-  final albumsIsAscendingNotifier = ValueNotifier(true);
-  final albumsUseLargePictureNotifier = ValueNotifier(false);
-  final albumsRandomizeNotifier = ValueNotifier(false);
+  ArtistAlbumManager() {
+    artistsIsAscendingNotifier.addListener(() {
+      sortArtists();
+      updateNotifier.value++;
+    });
+    albumsIsAscendingNotifier.addListener(() {
+      sortAlbums();
+      updateNotifier.value++;
+    });
+  }
 
   List<ArtistAlbumBase> getArtistAlbumList(bool isArtist) {
     return isArtist ? artistList : albumList;
   }
 
-  ValueNotifier<bool> getIsRandomizeNotifier(bool isArtist) {
+  ValueNotifier<bool> getRandomizeNotifier(bool isArtist) {
     return isArtist ? artistsRandomizeNotifier : albumsRandomizeNotifier;
   }
 
@@ -46,10 +52,8 @@ class ArtistAlbumManager {
   }
 
   void classify() {
-    for (final sourceType in SourceType.values) {
-      for (final song in library.songListManager.getSongList2(sourceType)) {
-        _processSong(song);
-      }
+    for (final song in library.songList) {
+      _processSong(song);
     }
 
     sortArtists();
@@ -57,12 +61,10 @@ class ArtistAlbumManager {
 
     for (final album in albumList) {
       album.sort();
-      album.songListManager.resetSourceType();
     }
 
     for (final artist in artistList) {
       artist.combineAlbums();
-      artist.songListManager.resetSourceType();
     }
 
     updateNotifier.value++;
@@ -71,25 +73,25 @@ class ArtistAlbumManager {
   void _processSong(MyAudioMetadata song) {
     final albumName = getAlbum(song);
 
-    Album? album = name2Album[albumName];
+    Album? album = albumMap[albumName];
     if (album == null) {
       album = Album(albumName);
       albumList.add(album);
-      name2Album[albumName] = album;
+      albumMap[albumName] = album;
     }
 
     if (song.year != null && album.year == null) {
       album.year = song.year;
     }
 
-    album.songListManager.getSongList2(song.sourceType).add(song);
+    album.songList.add(song);
 
     for (String artistName in getArtists(getArtist(song))) {
-      Artist? artist = name2Artist[artistName];
+      Artist? artist = artistMap[artistName];
       if (artist == null) {
         artist = Artist(artistName);
         artistList.add(artist);
-        name2Artist[artistName] = artist;
+        artistMap[artistName] = artist;
       }
       artist.albumSet.add(album);
     }
@@ -98,9 +100,9 @@ class ArtistAlbumManager {
   void sortArtists() {
     artistList.sort((a, b) {
       if (artistsIsAscendingNotifier.value) {
-        return compareMixed(a.name, b.name);
+        return a.compareName.compareTo(b.compareName);
       } else {
-        return compareMixed(b.name, a.name);
+        return b.compareName.compareTo(a.compareName);
       }
     });
   }
@@ -108,156 +110,119 @@ class ArtistAlbumManager {
   void sortAlbums() {
     albumList.sort((a, b) {
       if (albumsIsAscendingNotifier.value) {
-        return compareMixed(a.name, b.name);
+        return a.compareName.compareTo(b.compareName);
       } else {
-        return compareMixed(b.name, a.name);
+        return b.compareName.compareTo(a.compareName);
       }
     });
   }
 
-  void updateArtistAlbum(
-    MyAudioMetadata song,
-    String originArtist,
-    String originAlbum,
-  ) {
-    final currentArtist = getArtist(song);
-    final currentAlbum = getAlbum(song);
+  void updateArtistAlbum() {
+    layersManager.clearArtistAlbum();
+    artistList.clear();
+    albumList.clear();
+    artistMap.clear();
+    albumMap.clear();
 
-    final oldAlbum = name2Album[originAlbum]!;
-    oldAlbum.songListManager.localSongList.remove(song);
-
-    _processSong(song);
-
-    oldAlbum.sort();
-    oldAlbum.songListManager.localChangeNotifier.value++;
-
-    oldAlbum.songListManager.resetSourceType();
-
-    if (currentAlbum != originAlbum) {
-      if (oldAlbum.isEmpty) {
-        albumList.remove(oldAlbum);
-        name2Album.remove(originAlbum);
-        layersManager.removeLayerIfNeed(oldAlbum);
-      }
-      final newAlbum = name2Album[currentAlbum]!;
-      newAlbum.sort();
-      newAlbum.songListManager.localChangeNotifier.value++;
-      newAlbum.songListManager.resetSourceType();
-    }
-
-    sortAlbums();
-
-    Set<Artist> needProcess = {};
-
-    for (String artistName in getArtists(originArtist)) {
-      Artist artist = name2Artist[artistName]!;
-      needProcess.add(artist);
-    }
-
-    for (String artistName in getArtists(currentArtist)) {
-      Artist artist = name2Artist[artistName]!;
-      needProcess.add(artist);
-    }
-
-    for (final artist in needProcess) {
-      artist.combineAlbums();
-      artist.songListManager.localChangeNotifier.value++;
-
-      if (artist.songListManager.getSongList().isEmpty) {
-        artist.songListManager.resetSourceType();
-      }
-
-      if (artist.isEmpty) {
-        artistList.remove(artist);
-        name2Artist.remove(artist.name);
-        layersManager.removeLayerIfNeed(artist);
-      }
-    }
-
-    sortArtists();
-
-    updateNotifier.value++;
+    classify();
   }
 
-  Map<String, bool> settingToMap() {
-    return {
-      'artistsIsList': artistsIsListViewNotifier.value,
-      'artistsIsAscend': artistsIsAscendingNotifier.value,
-      'artistsUseLargePicture': artistsUseLargePictureNotifier.value,
+  // use completer to avoid loading same data multiple times
+  Completer<void>? artistCompleter;
+  Completer<int?>? ablumCompleter;
 
-      'albumsIsAscend': albumsIsAscendingNotifier.value,
-      'albumsUseLargePicture': albumsUseLargePictureNotifier.value,
-    };
+  Future<void> loadArtists() async {
+    if (artistCompleter == null) {
+      artistCompleter = Completer<void>();
+      final tmpArtistList = await streamClient?.getArtistList();
+      if (tmpArtistList == null) {
+        artistAlbumManager.updateNotifier.value++;
+        artistCompleter!.complete();
+        return;
+      }
+
+      for (final artist in tmpArtistList) {
+        artistList.add(artist);
+        artistMap[artist.name] = artist;
+      }
+      sortArtists();
+      artistAlbumManager.updateNotifier.value++;
+      artistCompleter!.complete();
+      return;
+    }
+    artistAlbumManager.updateNotifier.value++;
+    return artistCompleter!.future;
   }
 
-  void loadSetting(Map<String, dynamic> json) {
-    artistsIsListViewNotifier.value =
-        json['artistsIsList'] as bool? ?? artistsIsListViewNotifier.value;
+  // null: error; 0: end
+  Future<int?> loadAlbums() async {
+    if (ablumCompleter == null) {
+      ablumCompleter = Completer<int?>();
+      final albumList = await streamClient?.getAlbumList(
+        artistAlbumManager.albumList.length,
+      );
+      if (albumList == null) {
+        artistAlbumManager.updateNotifier.value++;
+        ablumCompleter!.complete(null);
+        ablumCompleter = null;
+        return null;
+      }
 
-    artistsIsAscendingNotifier.value =
-        json['artistsIsAscend'] as bool? ?? artistsIsAscendingNotifier.value;
+      artistAlbumManager.albumList.addAll(albumList);
+      sortAlbums();
+      artistAlbumManager.updateNotifier.value++;
 
-    artistsUseLargePictureNotifier.value =
-        json['artistsUseLargePicture'] as bool? ??
-        artistsUseLargePictureNotifier.value;
-
-    albumsIsAscendingNotifier.value =
-        json['albumsIsAscend'] as bool? ?? albumsIsAscendingNotifier.value;
-
-    albumsUseLargePictureNotifier.value =
-        json['albumsUseLargePicture'] as bool? ??
-        albumsUseLargePictureNotifier.value;
-  }
-
-  void clear() {
-    artistList = [];
-    name2Artist = {};
-    albumList = [];
-    name2Album = {};
-    updateNotifier.value++;
+      ablumCompleter!.complete(albumList.length);
+      ablumCompleter = null;
+      return albumList.length;
+    }
+    return ablumCompleter!.future;
   }
 }
 
 abstract class ArtistAlbumBase {
+  String? id;
   final String name;
+  late final String compareName;
 
-  SongListManager songListManager = SongListManager();
+  final List<MyAudioMetadata> songList = [];
 
   final bool isArtist;
-  ArtistAlbumBase(this.name, this.isArtist);
 
-  bool get isEmpty => songListManager.isEmpty;
+  MyPicture? _picture;
+  MyPicture get picture => isStreamSource ? _picture! : getCoverSong().picture;
 
-  MyAudioMetadata getCoverSong() {
-    return songListManager.getSongList().first;
+  ArtistAlbumBase(this.name, this.isArtist, {this.id, String? coverArtId}) {
+    id ??= name;
+    compareName = PinyinHelper.getPinyinE(name);
+    if (isStreamSource) {
+      _picture = MyPicture.form(coverArtId ?? '');
+    }
   }
 
-  int get totalCount => songListManager.totalCount;
+  bool get isEmpty => songList.isEmpty;
+
+  MyAudioMetadata getCoverSong() {
+    return songList.first;
+  }
+
+  int get totalCount => songList.length;
+
+  Completer<void>? completer;
+
+  Future<void> load();
 }
 
 class Artist extends ArtistAlbumBase {
-  Artist(String name) : super(name, true);
+  Artist(String name, {super.id, super.coverArtId}) : super(name, false);
 
   Set<Album> albumSet = {};
 
   List<Album> albumList = [];
 
-  void _fetchSongs(
-    List<MyAudioMetadata> fromSongList,
-    List<MyAudioMetadata> toSongList,
-  ) {
-    for (final song in fromSongList) {
-      for (String artistName in getArtists(getArtist(song))) {
-        if (artistName == name) {
-          toSongList.add(song);
-          break;
-        }
-      }
-    }
-  }
+  final changeNotifier = ValueNotifier(0);
 
   void combineAlbums() {
-    songListManager.clear();
     albumSet.removeWhere((album) => album.isEmpty);
     albumList = albumSet.toList();
     albumList.sort((a, b) {
@@ -268,19 +233,46 @@ class Artist extends ArtistAlbumBase {
     });
 
     for (final album in albumList) {
-      for (final sourceType in SourceType.values) {
-        _fetchSongs(
-          album.songListManager.getSongList2(sourceType),
-          songListManager.getSongList2(sourceType),
-        );
+      songList.addAll(album.artist2SongList[name]!);
+    }
+  }
+
+  @override
+  Future<void> load() async {
+    if (completer == null) {
+      completer = Completer<void>();
+      if (sourceType == .navidrome) {
+        final albums = await streamClient?.getArtistAlbumList(id!);
+        if (albums == null) {
+          completer!.complete();
+          return;
+        } else {
+          albumList.addAll(albums);
+        }
+
+        for (final album in albumList) {
+          await album.load();
+          songList.addAll(album.songList);
+          changeNotifier.value++;
+        }
+        completer!.complete();
+        return;
+      } else {
+        songList.addAll(await streamClient?.getArtistSongs(id!) ?? []);
+        changeNotifier.value++;
+        completer!.complete();
+        return;
       }
     }
+    return completer!.future;
   }
 }
 
 class Album extends ArtistAlbumBase {
-  Album(String name) : super(name, false);
+  Album(String name, {super.id, super.coverArtId, this.year})
+    : super(name, false);
 
+  Map<String, List<MyAudioMetadata>> artist2SongList = {};
   int? year;
 
   int _sort(MyAudioMetadata a, MyAudioMetadata b) {
@@ -297,47 +289,24 @@ class Album extends ArtistAlbumBase {
   }
 
   void sort() {
-    for (final sourceType in SourceType.values) {
-      songListManager.getSongList2(sourceType).sort(_sort);
+    songList.sort((a, b) => _sort(a, b));
+    for (final song in songList) {
+      for (String artistName in getArtists(getArtist(song))) {
+        final tmp = artist2SongList.putIfAbsent(artistName, () => []);
+        tmp.add(song);
+      }
     }
   }
-}
 
-void showArtistEntries(BuildContext context, List<String> artists) {
-  showAnimationDialog(
-    context: context,
-    child: SizedBox(
-      width: 300,
-      height: 350,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 20, 10, 20),
-        child: ListView.builder(
-          itemCount: artists.length,
-          itemExtent: 60,
-          itemBuilder: (context, index) {
-            String name = artists[index];
-            return Center(
-              child: ListTile(
-                leading: CoverArtWidget(
-                  size: 50,
-                  borderRadius: 5,
-                  song: artistAlbumManager.name2Artist[name]!.getCoverSong(),
-                ),
-                title: Text(name),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await Future.delayed(Duration(milliseconds: 250));
-
-                  layersManager.switchRootLayer('artists');
-                  layersManager.pushDetailIfNeed(
-                    artistAlbumManager.name2Artist[name],
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      ),
-    ),
-  );
+  @override
+  Future<void> load() async {
+    if (completer == null) {
+      // ensure load one time
+      completer = Completer<void>();
+      songList.addAll(await streamClient?.getAlbumSongs(id!) ?? []);
+      completer!.complete();
+      return;
+    }
+    return completer!.future;
+  }
 }

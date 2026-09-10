@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/asset_images.dart';
 import 'package:sylvakru/base/services/interaction.dart';
@@ -78,7 +78,7 @@ class _Add2PlaylistPanelState extends State<Add2PlaylistPanel> {
                     leading: CoverArtWidget(
                       size: 40,
                       borderRadius: 4,
-                      song: playlist.getCoverSong(),
+                      picture: playlist.getCoverSong()?.picture,
                     ),
                     title: Text(
                       index == 0 ? l10n.favorites : playlist.name,
@@ -87,7 +87,6 @@ class _Add2PlaylistPanelState extends State<Add2PlaylistPanel> {
 
                     onTap: () {
                       playlist.add(widget.songList);
-                      showCenterMessage(context, l10n.added2Playlist);
                       Navigator.pop(context);
                     },
                   );
@@ -205,7 +204,7 @@ Widget _playlistListTile(Playlist playlist) {
       leading: CoverArtWidget(
         size: 50,
         borderRadius: 5,
-        song: playlist.getCoverSong(),
+        picture: playlist.getCoverSong()?.picture,
       ),
       title: Text(playlist.name),
       subtitle: Builder(

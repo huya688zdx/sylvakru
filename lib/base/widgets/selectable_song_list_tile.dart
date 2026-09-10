@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/asset_images.dart';
@@ -49,7 +49,11 @@ class SelectableSongListTile extends StatelessWidget {
           child: GestureDetector(
             child: ListTile(
               contentPadding: EdgeInsets.fromLTRB(0, 0, 0, 0),
-              leading: CoverArtWidget(size: 40, borderRadius: 4, song: song),
+              leading: CoverArtWidget(
+                size: 40,
+                borderRadius: 4,
+                picture: song.picture,
+              ),
               title: ValueListenableBuilder(
                 valueListenable: currentSongNotifier,
                 builder: (_, currentSong, _) {
@@ -75,7 +79,7 @@ class SelectableSongListTile extends StatelessWidget {
                           ? SizedBox(
                               width: 20,
                               child: Icon(
-                                Icons.favorite,
+                                Icons.star_rounded,
                                 color: Colors.red,
                                 size: 15,
                               ),

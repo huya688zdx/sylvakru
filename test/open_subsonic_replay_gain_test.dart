@@ -1,3 +1,4 @@
+import 'package:sylvakru/base/data/library.dart' as library_data;
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,6 +15,13 @@ void main() {
       'open_subsonic_replay_gain_test',
     );
     app.appSupportDir = appSupportDirectory;
+    app.sourceType = app.SourceType.navidrome;
+    app.isStreamSource = true;
+    app.isNotStreamSource = false;
+  });
+
+  setUp(() {
+    library_data.library.id2Song.clear();
   });
 
   tearDownAll(() async {
@@ -21,7 +29,7 @@ void main() {
   });
 
   test('OpenSubsonic replayGain 兼容数值和带 dB 的字符串', () {
-    final song = MyAudioMetadata.fromOpenSonicMap({
+    final song = MyAudioMetadata.fromMap({
       'id': 'song-id',
       'title': 'Song',
       'replayGain': {
@@ -39,7 +47,7 @@ void main() {
   });
 
   test('OpenSubsonic replayGain 忽略非法值、非有限值和非正峰值', () {
-    final song = MyAudioMetadata.fromOpenSonicMap({
+    final song = MyAudioMetadata.fromMap({
       'id': 'invalid-song-id',
       'title': 'Invalid Song',
       'replayGain': {
@@ -48,7 +56,7 @@ void main() {
         'albumGain': double.infinity,
         'albumPeak': '-1',
       },
-    }, app.SourceType.subsonic);
+    }, app.SourceType.navidrome);
 
     expect(song.replayGainTrackGainDb, isNull);
     expect(song.replayGainTrackPeak, isNull);
@@ -84,10 +92,7 @@ void main() {
     );
 
     final songMap = await client.getSong('song-id');
-    final song = MyAudioMetadata.fromOpenSonicMap(
-      songMap!,
-      app.SourceType.navidrome,
-    );
+    final song = MyAudioMetadata.fromMap(songMap!, app.SourceType.navidrome);
 
     expect(song.replayGainTrackGainDb, -7.25);
     expect(song.replayGainTrackPeak, 0.91);

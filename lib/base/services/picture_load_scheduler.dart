@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:sylvakru/base/services/picture_service.dart';
+
 PictureLoadScheduler pictureLoadScheduler = PictureLoadScheduler();
 
 class PictureLoadScheduler {
@@ -8,30 +10,31 @@ class PictureLoadScheduler {
   int _running = 0;
   final _queue = <_Task>[];
 
-  final Map<String, Future<void>> _inFlight = {};
+  final Map<String, Completer<void>> _pictureCompleterMap = {};
+  final Set<String> _scheduled = {};
+  final Set<int> _needRun = {};
 
-  Future<void> load(String key, Future<void> Function() loader) {
-    if (_inFlight.containsKey(key)) {
-      return _inFlight[key]!;
+  Future<void> load(String id, Future<void> Function() loader, int? widgetId) {
+    final completer = _pictureCompleterMap.putIfAbsent(
+      id,
+      () => Completer<void>(),
+    );
+
+    if (widgetId != null) {
+      _needRun.add(widgetId);
     }
+    _queue.add(
+      _Task(widgetId, () async {
+        if (!_scheduled.contains(id)) {
+          _scheduled.add(id);
 
-    final completer = Completer<void>();
-
-    final task = _Task(() async {
-      try {
-        await loader();
-        completer.complete();
-      } catch (_, _) {
-        completer.complete();
-      } finally {
-        _inFlight.remove(key);
+          await loader();
+          completer.complete();
+        }
         _running--;
         _schedule();
-      }
-    });
-
-    _inFlight[key] = completer.future;
-    _queue.add(task);
+      }),
+    );
 
     _schedule();
 
@@ -41,13 +44,34 @@ class PictureLoadScheduler {
   void _schedule() {
     while (_running < maxConcurrent && _queue.isNotEmpty) {
       final task = _queue.removeAt(0);
-      _running++;
-      task.run();
+      if (task.widgetId == null || _needRun.contains(task.widgetId!)) {
+        _running++;
+        task.run();
+      }
     }
+  }
+
+  void cancel(int widgetId) {
+    _needRun.remove(widgetId);
+  }
+
+  void resetPicture(MyPicture picture) {
+    _scheduled.remove(picture.id);
+    _pictureCompleterMap.remove(picture.id);
+  }
+
+  void clear() {
+    _queue.clear();
+    _needRun.clear();
+    _scheduled.clear();
+    _pictureCompleterMap.clear();
+    _running = 0;
   }
 }
 
 class _Task {
+  final int? widgetId;
   final Future<void> Function() run;
-  _Task(this.run);
+
+  _Task(this.widgetId, this.run);
 }

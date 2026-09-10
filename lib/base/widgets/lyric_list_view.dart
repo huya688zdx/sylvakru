@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:sylvakru/base/audio_handler.dart';
@@ -12,6 +12,9 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:smooth_corner/smooth_corner.dart';
 
 final lyricsFontSizeOffsetNotifier = ValueNotifier(0.0);
+final lyricsTimeOffsetNotifier = ValueNotifier(0);
+final lyricsFontWeightNotifier = ValueNotifier(FontWeight.bold);
+
 final updateLyricsNotifier = ValueNotifier(0);
 
 class LyricsListView extends StatefulWidget {
@@ -42,6 +45,7 @@ class LyricsListViewState extends State<LyricsListView>
   Timer? timer;
 
   void scroll2CurrentIndex(Duration position) async {
+    position += Duration(milliseconds: lyricsTimeOffsetNotifier.value);
     // it's weird that the position is sometimes negative
     if (audioHandler.isLoading || position < Duration.zero) {
       return;
@@ -237,72 +241,71 @@ class LyricLineWidget extends StatelessWidget {
           padding: expanded
               ? EdgeInsets.fromLTRB(25, paddingHeight, 30, paddingHeight)
               : const EdgeInsets.symmetric(vertical: 5, horizontal: 15),
-          child: ValueListenableBuilder(
-            valueListenable: lyricsFontSizeOffsetNotifier,
-            builder: (_, _, _) {
-              return ValueListenableBuilder(
-                valueListenable: currentIndexNotifier,
-                builder: (context, currentIndex, child) {
-                  final isCurrent = currentIndex == index;
+          child: ListenableBuilder(
+            listenable: Listenable.merge([
+              lyricsFontSizeOffsetNotifier,
+              lyricsFontWeightNotifier,
+              currentIndexNotifier,
+            ]),
+            builder: (context, _) {
+              final isCurrent = currentIndexNotifier.value == index;
 
-                  double fontSize = 16 + lyricsFontSizeOffsetNotifier.value;
+              double fontSize = 16 + lyricsFontSizeOffsetNotifier.value;
 
-                  if (expanded) {
-                    fontSize += isMobile ? 16 : 8;
-                  }
+              if (expanded) {
+                fontSize += isMobile ? 16 : 8;
+              }
 
-                  fontSize += fontSizeOffset;
+              fontSize += fontSizeOffset;
 
-                  final textColor = viewModeNotifier.value == .mini
-                      ? miniViewForegroundColor.value
-                      : lyricsPageForegroundColor.value;
+              final textColor = viewModeNotifier.value == .mini
+                  ? miniViewForegroundColor.value
+                  : lyricsPageForegroundColor.value;
 
-                  return AnimatedScale(
-                    scale: isCurrent ? 1.05 : 0.95,
-                    duration: Duration(milliseconds: 300),
-                    alignment: expanded ? .centerLeft : .center,
-                    child: Column(
-                      crossAxisAlignment: expanded ? .start : .center,
-                      children: [
-                        if (isCurrent && isKaraoke)
-                          ValueListenableBuilder(
-                            valueListenable: updateLyricsNotifier,
-                            builder: (context, value, child) {
-                              return KaraokeText(
-                                key: UniqueKey(),
-                                line: line,
-                                position: audioHandler.getPosition(),
-                                fontSize: fontSize,
-                                expanded: expanded,
-                              );
-                            },
-                          )
-                        else
-                          Text(
-                            line.text,
-                            textAlign: expanded ? .start : .center,
-                            style: TextStyle(
-                              fontSize: fontSize,
-                              fontWeight: .bold,
-                              color: isCurrent
-                                  ? textColor
-                                  : textColor.withAlpha(128),
-                            ),
-                          ),
-                        for (final translate in line.translates)
-                          Text(
-                            translate,
-                            textAlign: expanded ? .start : .center,
-                            style: TextStyle(
-                              fontSize: fontSize - (expanded ? 8 : 4),
-                              fontWeight: .bold,
-                              color: textColor.withAlpha(128),
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
+              return AnimatedScale(
+                scale: isCurrent ? 1.05 : 0.95,
+                duration: Duration(milliseconds: 300),
+                alignment: expanded ? .centerLeft : .center,
+                child: Column(
+                  crossAxisAlignment: expanded ? .start : .center,
+                  children: [
+                    if (isCurrent && isKaraoke)
+                      ValueListenableBuilder(
+                        valueListenable: updateLyricsNotifier,
+                        builder: (context, value, child) {
+                          return KaraokeText(
+                            key: UniqueKey(),
+                            line: line,
+                            position: audioHandler.getPosition(),
+                            fontSize: fontSize,
+                            expanded: expanded,
+                          );
+                        },
+                      )
+                    else
+                      Text(
+                        line.text,
+                        textAlign: expanded ? .start : .center,
+                        style: TextStyle(
+                          fontSize: fontSize,
+                          fontWeight: lyricsFontWeightNotifier.value,
+                          color: isCurrent
+                              ? textColor
+                              : textColor.withAlpha(128),
+                        ),
+                      ),
+                    for (final translate in line.translates)
+                      Text(
+                        translate,
+                        textAlign: expanded ? .start : .center,
+                        style: TextStyle(
+                          fontSize: fontSize - (expanded ? 8 : 4),
+                          fontWeight: lyricsFontWeightNotifier.value,
+                          color: textColor.withAlpha(128),
+                        ),
+                      ),
+                  ],
+                ),
               );
             },
           ),
@@ -401,19 +404,21 @@ class KaraokeTextState extends State<KaraokeText>
     final end = token.end;
 
     double progress;
-    if (displayPosition <= start) {
+    final position =
+        displayPosition +
+        Duration(milliseconds: lyricsTimeOffsetNotifier.value);
+    if (position <= start) {
       progress = 0;
-    } else if (displayPosition >= end!) {
+    } else if (position >= end!) {
       progress = 1;
     } else {
       progress =
-          (displayPosition - start).inMilliseconds /
-          (end - start).inMilliseconds;
+          (position - start).inMilliseconds / (end - start).inMilliseconds;
     }
 
     final style = TextStyle(
       fontSize: widget.fontSize,
-      fontWeight: FontWeight.bold,
+      fontWeight: lyricsFontWeightNotifier.value,
       color: textColor,
     );
 

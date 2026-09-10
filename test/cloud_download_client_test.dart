@@ -1,3 +1,4 @@
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -68,7 +69,15 @@ void main() {
       'sylvakru_app_support_test',
     );
     app.appSupportDir = appSupportDirectory;
+    app.sourceType = app.SourceType.navidrome;
+    app.isStreamSource = true;
+    app.isNotStreamSource = false;
     await logger.init();
+    await library_data.loadLibrary();
+  });
+
+  setUp(() {
+    library_data.library.id2Song.clear();
   });
 
   tearDownAll(() async {
@@ -93,8 +102,8 @@ void main() {
       client.setReceiveTimeout(const Duration(seconds: 1));
 
       final completed = await client.downloadSong(
-        songId: 'song-id',
-        savePath: '${directory.path}/song.part',
+        'song-id',
+        '${directory.path}/song.part',
       );
 
       expect(completed, isTrue);
@@ -163,11 +172,13 @@ void main() {
       username: 'user',
       password: 'password',
     );
+    // 验证请求级超时覆盖客户端默认值，测试需访问受保护的客户端配置。
+    // ignore: invalid_use_of_protected_member
     client.dio.options.receiveTimeout = const Duration(seconds: 1);
 
     final completed = await client.downloadSong(
-      itemId: 'song-id',
-      savePath: '${directory.path}/song.part',
+      'song-id',
+      '${directory.path}/song.part',
     );
 
     expect(completed, isTrue);
@@ -190,10 +201,7 @@ void main() {
       password: 'password',
     );
 
-    final completed = await client.downloadSong(
-      songId: 'song-id',
-      savePath: partPath,
-    );
+    final completed = await client.downloadSong('song-id', partPath);
 
     expect(completed, isFalse);
     expect(File(partPath).existsSync(), isTrue);
@@ -240,10 +248,7 @@ void main() {
       password: 'password',
     );
 
-    final completed = await client.downloadSong(
-      itemId: 'song-id',
-      savePath: partPath,
-    );
+    final completed = await client.downloadSong('song-id', partPath);
 
     expect(completed, isFalse);
     expect(File(partPath).existsSync(), isTrue);
@@ -281,8 +286,8 @@ void main() {
     );
 
     final download = client.downloadSong(
-      songId: 'song-id',
-      savePath: partPath,
+      'song-id',
+      partPath,
       cancelToken: cancelToken,
     );
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -312,12 +317,12 @@ void main() {
       socket.destroy();
     });
     await library_data.loadLibrary();
-    navidromeClient = NavidromeClient(
+    streamClient = NavidromeClient(
       baseUrl: 'http://${server.address.address}:${server.port}',
       username: 'user',
       password: 'password',
     );
-    final song = MyAudioMetadata.fromOpenSonicMap({
+    final song = MyAudioMetadata.fromMap({
       'id': 'song-id',
       'title': 'Song',
       'suffix': 'flac',
@@ -360,12 +365,12 @@ void main() {
         }
       });
 
-      navidromeClient = NavidromeClient(
+      streamClient = NavidromeClient(
         baseUrl: 'http://${server.address.address}:${server.port}',
         username: 'user',
         password: 'password',
       );
-      final song = MyAudioMetadata.fromOpenSonicMap({
+      final song = MyAudioMetadata.fromMap({
         'id': 'retry-song-id',
         'title': 'Retry Song',
         'suffix': 'flac',
@@ -437,12 +442,12 @@ void main() {
         });
       });
 
-      navidromeClient = NavidromeClient(
+      streamClient = NavidromeClient(
         baseUrl: 'http://${server.address.address}:${server.port}',
         username: 'user',
         password: 'password',
       );
-      final song = MyAudioMetadata.fromOpenSonicMap({
+      final song = MyAudioMetadata.fromMap({
         'id': 'resume-song-id',
         'title': 'Resume Song',
         'suffix': 'flac',
@@ -478,12 +483,12 @@ void main() {
       });
 
       await library_data.loadLibrary();
-      navidromeClient = NavidromeClient(
+      streamClient = NavidromeClient(
         baseUrl: 'http://${server.address.address}:${server.port}',
         username: 'user',
         password: 'password',
       );
-      final song = MyAudioMetadata.fromOpenSonicMap({
+      final song = MyAudioMetadata.fromMap({
         'id': 'replay-gain-song-id',
         'title': 'ReplayGain Song',
         'suffix': 'dsf',
@@ -504,7 +509,7 @@ void main() {
     'existing cloud cache is scanned once to supplement ReplayGain',
     () async {
       await library_data.loadLibrary();
-      final song = MyAudioMetadata.fromOpenSonicMap({
+      final song = MyAudioMetadata.fromMap({
         'id': 'existing-replay-gain-cache',
         'title': 'Existing ReplayGain Cache',
         'suffix': 'dsf',
@@ -545,12 +550,12 @@ void main() {
       });
 
       await library_data.loadLibrary();
-      navidromeClient = NavidromeClient(
+      streamClient = NavidromeClient(
         baseUrl: 'http://${server.address.address}:${server.port}',
         username: 'user',
         password: 'password',
       );
-      final song = MyAudioMetadata.fromOpenSonicMap({
+      final song = MyAudioMetadata.fromMap({
         'id': 'complete-replay-gain-song-id',
         'title': 'Complete ReplayGain Song',
         'suffix': 'dsf',
@@ -600,18 +605,18 @@ void main() {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final requests = server.listen((_) {});
     addTearDown(() async {
-      navidromeClient = null;
+      streamClient = null;
       await requests.cancel();
       await server.close(force: true);
     });
 
     await library_data.loadLibrary();
-    navidromeClient = NavidromeClient(
+    streamClient = NavidromeClient(
       baseUrl: 'http://${server.address.address}:${server.port}',
       username: 'user',
       password: 'password',
     );
-    final song = MyAudioMetadata.fromOpenSonicMap({
+    final song = MyAudioMetadata.fromMap({
       'id': 'slow-replay-gain-song-id',
       'title': 'Slow ReplayGain Song',
       'suffix': 'flac',
@@ -644,12 +649,12 @@ void main() {
       });
 
       await library_data.loadLibrary();
-      navidromeClient = NavidromeClient(
+      streamClient = NavidromeClient(
         baseUrl: 'http://${server.address.address}:${server.port}',
         username: 'user',
         password: 'password',
       );
-      final song = MyAudioMetadata.fromOpenSonicMap({
+      final song = MyAudioMetadata.fromMap({
         'id': 'invalid-metadata-song-id',
         'title': 'Invalid Metadata Song',
         'suffix': 'mp3',
