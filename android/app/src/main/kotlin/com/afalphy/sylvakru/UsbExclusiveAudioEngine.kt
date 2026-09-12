@@ -1601,13 +1601,8 @@ class UsbExclusiveAudioEngine(
                                 hardwareVolumeRaw = actual!!.raw
                                 hardwareVolumeGainQ16 = actual.gainQ16
                                 standardHardwareVolumeReadbackVerified = true
-                                pendingHardwareVolumeEvent = hardwareVolumeEventMap(
-                                    protocol,
-                                    actual.gainQ16,
-                                    actual.raw,
-                                    actual.raw,
-                                    isDsd,
-                                )
+                                // 写入确认通过播放状态发布，不能冒充设备主动调音量，
+                                // 否则 Dart 会取消用户尚未完成的渐升目标。
                             }
                         }
                         if (!hardwareVolumeActive && wasHardwareActive && !isDsd) {
