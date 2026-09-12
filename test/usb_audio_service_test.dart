@@ -30,6 +30,16 @@ void main() {
       generation: 2,
     ).applied(actualDb: -8.4);
     expect(formatReplayGainStatus(applied, l10n), '-8.4 dB');
+    final fallback = ReplayGainPlaybackState.pending(
+      selectedDb: -6,
+      path: ReplayGainOutputPath.sharedDigital,
+      generation: 3,
+      isFallback: true,
+    ).applied(actualDb: -6);
+    expect(
+      formatReplayGainStatus(fallback, l10n),
+      l10n.replayGainFallbackStatus('-6 dB'),
+    );
   });
 
   const channel = MethodChannel('com.afalphy.sylvakru/usb_audio');

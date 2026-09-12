@@ -347,6 +347,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       selectedDb: _currentReplayGain.gainDb,
       path: path,
       generation: generation,
+      isFallback: _currentReplayGain.source == null,
     );
   }
 
@@ -1380,15 +1381,17 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   /// 自动切歌时下一首已整首缓存，可直接走独占。先等当前曲的缓存
   /// 下载完（tryAddCache 按路径去重，重复调用会合并），避免抢带宽。
   void _prefetchNextSongCache() {
-    if (!Platform.isAndroid ||
-        !usbAudioPreferences.performanceModeNotifier.value) {
-      return;
-    }
     if (playQueue.length < 2) {
       return;
     }
     final current = playQueue[currentIndex];
     final next = playQueue[(currentIndex + 1) % playQueue.length];
+    // 共享输出也提前补读下一首标签，减少开播后从回退增益切换到标签增益。
+    unawaited(library.supplementReplayGainForPlayback(next));
+    if (!Platform.isAndroid ||
+        !usbAudioPreferences.performanceModeNotifier.value) {
+      return;
+    }
     final generation = _loadGeneration;
     if (sourceType == .local || next.cacheExist) {
       return;

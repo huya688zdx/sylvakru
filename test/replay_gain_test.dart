@@ -58,6 +58,7 @@ void main() {
       selectedDb: -6,
       path: ReplayGainOutputPath.sharedDigital,
       generation: 3,
+      isFallback: true,
     );
     final applied = pending.applied(actualDb: -5.5);
     final failed = pending.failed();
@@ -65,7 +66,9 @@ void main() {
     expect(pending.phase, ReplayGainApplyPhase.pending);
     expect(applied.phase, ReplayGainApplyPhase.applied);
     expect(applied.actualDb, -5.5);
+    expect(applied.isFallback, isTrue);
     expect(failed.phase, ReplayGainApplyPhase.failed);
+    expect(failed.isFallback, isTrue);
   });
 
   test('音轨模式优先使用音轨增益和同组峰值', () {
@@ -158,13 +161,13 @@ void main() {
     expect(result.source, isNull);
   });
 
-  test('DSD 无标签不应用回退增益', () {
+  test('DSD 无标签与其他格式一样应用回退增益', () {
     final song = metadata();
     song.path = '/music/test.dsf';
 
     final result = replayGainFor(song, ReplayGainMode.track, fallbackDb: -6);
 
-    expect(result.gainDb, 0);
+    expect(result.gainDb, -6);
     expect(result.source, isNull);
   });
 

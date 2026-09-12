@@ -16,6 +16,7 @@ class ReplayGainPlaybackState {
   final double selectedDb;
   final double? actualDb;
   final int generation;
+  final bool isFallback;
 
   const ReplayGainPlaybackState({
     required this.phase,
@@ -23,6 +24,7 @@ class ReplayGainPlaybackState {
     required this.selectedDb,
     required this.actualDb,
     required this.generation,
+    this.isFallback = false,
   });
 
   factory ReplayGainPlaybackState.off() => const ReplayGainPlaybackState(
@@ -45,12 +47,14 @@ class ReplayGainPlaybackState {
     required double selectedDb,
     required ReplayGainOutputPath path,
     required int generation,
+    bool isFallback = false,
   }) => ReplayGainPlaybackState(
     phase: ReplayGainApplyPhase.pending,
     path: path,
     selectedDb: selectedDb,
     actualDb: null,
     generation: generation,
+    isFallback: isFallback,
   );
 
   ReplayGainPlaybackState applied({required double actualDb}) =>
@@ -60,6 +64,7 @@ class ReplayGainPlaybackState {
         selectedDb: selectedDb,
         actualDb: actualDb,
         generation: generation,
+        isFallback: isFallback,
       );
 
   ReplayGainPlaybackState failed() => ReplayGainPlaybackState(
@@ -68,6 +73,7 @@ class ReplayGainPlaybackState {
     selectedDb: selectedDb,
     actualDb: null,
     generation: generation,
+    isFallback: isFallback,
   );
 }
 
@@ -173,12 +179,7 @@ ReplayGainResult replayGainFor(
         : math.min(gain, -20 * math.log(peak) / math.ln10);
     return ReplayGainResult(limitedGain, peak, source);
   }
-  // 无标签回退增益：有标签的歌普遍被压负增益，无标签保持 0 dB 会在
-  // 切歌时突然变响，按用户配置的回退值统一衰减拉近响度。
-  // DSD 不适用：几乎都无标签且转 PCM/DoP 电平本就偏低，再压会明显偏小声
-  if (song.isDsd) {
-    return const ReplayGainResult(0, null, null);
-  }
+  // 无标签按用户配置兜底，不以编码格式推断响度；DSD 硬件电平补偿由输出链路另行处理。
   final safeFallbackDb = fallbackDb.isFinite
       ? fallbackDb.clamp(-24.0, 0.0).toDouble()
       : 0.0;

@@ -784,14 +784,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get replayGainFallback => 'Untagged fallback gain';
 
   @override
-  String get dsdGainCompensation => 'DSD gain compensation';
+  String replayGainFallbackStatus(String status) {
+    return 'Untagged fallback · $status';
+  }
+
+  @override
+  String get replayGainFallbackDesc =>
+      'Attenuate by this amount when no usable tags are available, including DSD. A fixed fallback cannot guarantee matching loudness.';
+
+  @override
+  String get dsdGainCompensation => 'DSD hardware level compensation';
+
+  @override
+  String get dsdGainCompensationDesc =>
+      'Calibrates DAC hardware output level for USB DoP/Native and combines with ReplayGain. Does not apply to DSD-to-PCM playback.';
+
+  @override
+  String get dsdGainCompensationAvailable =>
+      'The current output supports DSD hardware level compensation.';
+
+  @override
+  String get dsdGainCompensationUnavailable =>
+      'DSD hardware level compensation does not apply to the current output.';
 
   @override
   String get volumeSmoothHandoff => 'Smooth volume handoff';
 
   @override
   String get volumeSmoothHandoffDesc =>
-      'Keep loudness continuous when switching between digital volume and DAC hardware volume.';
+      'Ramp digital attenuation when PCM switches to DAC hardware volume. Preserve a lower DAC volume on first takeover. Normal volume increase protection stays enabled.';
 
   @override
   String get mediaVolume => 'Current media volume';

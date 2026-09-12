@@ -306,9 +306,19 @@
   "replayGainNotApplied": "Not applied",
   "replayGainNoTag": "No tag",
   "replayGainFallback": "Untagged fallback gain",
-  "dsdGainCompensation": "DSD gain compensation",
+  "replayGainFallbackStatus": "Untagged fallback · {status}",
+  "@replayGainFallbackStatus": {
+    "placeholders": {
+      "status": {"type": "String"}
+    }
+  },
+  "replayGainFallbackDesc": "Attenuate by this amount when no usable tags are available, including DSD. A fixed fallback cannot guarantee matching loudness.",
+  "dsdGainCompensation": "DSD hardware level compensation",
+  "dsdGainCompensationDesc": "Calibrates DAC hardware output level for USB DoP/Native and combines with ReplayGain. Does not apply to DSD-to-PCM playback.",
+  "dsdGainCompensationAvailable": "The current output supports DSD hardware level compensation.",
+  "dsdGainCompensationUnavailable": "DSD hardware level compensation does not apply to the current output.",
   "volumeSmoothHandoff": "Smooth volume handoff",
-  "volumeSmoothHandoffDesc": "Keep loudness continuous when switching between digital volume and DAC hardware volume.",
+  "volumeSmoothHandoffDesc": "Ramp digital attenuation when PCM switches to DAC hardware volume. Preserve a lower DAC volume on first takeover. Normal volume increase protection stays enabled.",
   "mediaVolume": "Current media volume",
   "compatibility": "Compatibility",
   "releaseUsbBandwidth": "Release USB bandwidth after playback",

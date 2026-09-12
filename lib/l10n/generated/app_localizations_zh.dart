@@ -770,13 +770,32 @@ class AppLocalizationsZh extends AppLocalizations {
   String get replayGainFallback => '无标签回退增益';
 
   @override
-  String get dsdGainCompensation => 'DSD 增益补偿';
+  String replayGainFallbackStatus(String status) {
+    return '无标签回退 · $status';
+  }
+
+  @override
+  String get replayGainFallbackDesc => '没有可用标签时按此值衰减，DSD 同样适用。固定回退不能保证歌曲响度一致。';
+
+  @override
+  String get dsdGainCompensation => 'DSD 硬件电平补偿';
+
+  @override
+  String get dsdGainCompensationDesc =>
+      '仅校准 USB DoP/Native 的 DAC 硬件输出电平，与回放增益叠加；DSD 转 PCM 不应用。';
+
+  @override
+  String get dsdGainCompensationAvailable => '当前输出支持 DSD 硬件电平补偿。';
+
+  @override
+  String get dsdGainCompensationUnavailable => '当前输出不应用 DSD 硬件电平补偿。';
 
   @override
   String get volumeSmoothHandoff => '音量平滑交接';
 
   @override
-  String get volumeSmoothHandoffDesc => '切换数字音量与 DAC 硬件音量时保持响度连续。';
+  String get volumeSmoothHandoffDesc =>
+      'PCM 切入 DAC 硬件音量时渐变数字衰减；首次接管优先保留较小的 DAC 音量。常规音量上升保护始终启用。';
 
   @override
   String get mediaVolume => '当前媒体音量';

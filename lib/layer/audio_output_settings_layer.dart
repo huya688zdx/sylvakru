@@ -278,6 +278,17 @@ class _AudioOutputSettingsLayerState extends State<AudioOutputSettingsLayer> {
                   values: const [-12, -9, -6, -3, 0, 3, 6],
                   label: (value) => '$value dB',
                 ),
+                _hintTile(_l10n.dsdGainCompensationDesc),
+                ValueListenableBuilder<UsbExclusivePlaybackState>(
+                  valueListenable: usbExclusivePlaybackStateNotifier,
+                  builder: (context, exclusive, _) => _hintTile(
+                    exclusive.active &&
+                            exclusive.bitDepth == 1 &&
+                            exclusive.hardwareVolumeActive
+                        ? _l10n.dsdGainCompensationAvailable
+                        : _l10n.dsdGainCompensationUnavailable,
+                  ),
+                ),
                 _mediaVolumeTile(),
                 _switchTile(
                   title: _l10n.volumeSmoothHandoff,
@@ -759,6 +770,7 @@ class _AudioOutputSettingsLayerState extends State<AudioOutputSettingsLayer> {
           values: UsbAudioPreferences.replayGainFallbackDbOptions,
           label: (value) => '$value dB',
         ),
+        _hintTile(_l10n.replayGainFallbackDesc),
       ],
     );
   }

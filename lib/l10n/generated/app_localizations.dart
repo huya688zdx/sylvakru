@@ -1580,11 +1580,41 @@ abstract class AppLocalizations {
   /// **'Untagged fallback gain'**
   String get replayGainFallback;
 
+  /// No description provided for @replayGainFallbackStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Untagged fallback · {status}'**
+  String replayGainFallbackStatus(String status);
+
+  /// No description provided for @replayGainFallbackDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Attenuate by this amount when no usable tags are available, including DSD. A fixed fallback cannot guarantee matching loudness.'**
+  String get replayGainFallbackDesc;
+
   /// No description provided for @dsdGainCompensation.
   ///
   /// In en, this message translates to:
-  /// **'DSD gain compensation'**
+  /// **'DSD hardware level compensation'**
   String get dsdGainCompensation;
+
+  /// No description provided for @dsdGainCompensationDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Calibrates DAC hardware output level for USB DoP/Native and combines with ReplayGain. Does not apply to DSD-to-PCM playback.'**
+  String get dsdGainCompensationDesc;
+
+  /// No description provided for @dsdGainCompensationAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'The current output supports DSD hardware level compensation.'**
+  String get dsdGainCompensationAvailable;
+
+  /// No description provided for @dsdGainCompensationUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'DSD hardware level compensation does not apply to the current output.'**
+  String get dsdGainCompensationUnavailable;
 
   /// No description provided for @volumeSmoothHandoff.
   ///
@@ -1595,7 +1625,7 @@ abstract class AppLocalizations {
   /// No description provided for @volumeSmoothHandoffDesc.
   ///
   /// In en, this message translates to:
-  /// **'Keep loudness continuous when switching between digital volume and DAC hardware volume.'**
+  /// **'Ramp digital attenuation when PCM switches to DAC hardware volume. Preserve a lower DAC volume on first takeover. Normal volume increase protection stays enabled.'**
   String get volumeSmoothHandoffDesc;
 
   /// No description provided for @mediaVolume.

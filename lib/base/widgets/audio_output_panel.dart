@@ -15,7 +15,7 @@ String formatReplayGainStatus(
   ReplayGainPlaybackState state,
   AppLocalizations l10n,
 ) {
-  return switch (state.phase) {
+  final status = switch (state.phase) {
     ReplayGainApplyPhase.off => l10n.replayGainOff,
     ReplayGainApplyPhase.noTag => l10n.replayGainNoTag,
     ReplayGainApplyPhase.pending => l10n.replayGainApplying,
@@ -23,6 +23,7 @@ String formatReplayGainStatus(
     ReplayGainApplyPhase.applied =>
       '${state.actualDb!.toStringAsFixed(3).replaceFirst(RegExp(r'\.?0+$'), '')} dB',
   };
+  return state.isFallback ? l10n.replayGainFallbackStatus(status) : status;
 }
 
 String formatSampleRate(int? sampleRate, AppLocalizations l10n) {
