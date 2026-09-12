@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/replay_gain.dart';
 import 'package:sylvakru/base/services/usb_audio_preferences.dart';
 import 'package:sylvakru/base/services/usb_audio_service.dart';
+import 'package:sylvakru/base/widgets/lyric_list_view.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 
 String formatReplayGainStatus(
@@ -221,7 +223,7 @@ class AudioOutputChip extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               onTap: () {
                 tryVibrate();
-                showAudioOutputSheet(context, song);
+                showAudioOutputSheet(context);
               },
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 320),
@@ -282,10 +284,7 @@ class AudioOutputChip extends StatelessWidget {
 // 各自排队再弹一层；面板打开期间同样置真，杜绝叠层
 bool _audioOutputSheetShowing = false;
 
-Future<void> showAudioOutputSheet(
-  BuildContext context,
-  MyAudioMetadata? song,
-) async {
+Future<void> showAudioOutputSheet(BuildContext context) async {
   if (_audioOutputSheetShowing) return;
   _audioOutputSheetShowing = true;
   try {
@@ -298,8 +297,15 @@ Future<void> showAudioOutputSheet(
       useSafeArea: true,
       barrierColor: _barrierColor(),
       backgroundColor: Colors.transparent,
-      builder: (context) =>
-          RepaintBoundary(child: _AudioOutputSheet(song: song)),
+      builder: (context) => ListenableBuilder(
+        listenable: Listenable.merge([
+          currentSongNotifier,
+          updateLyricsNotifier,
+        ]),
+        builder: (context, child) => RepaintBoundary(
+          child: _AudioOutputSheet(song: currentSongNotifier.value),
+        ),
+      ),
     );
   } finally {
     _audioOutputSheetShowing = false;
@@ -486,10 +492,7 @@ class _UsbAudioDetectedSheetState extends State<_UsbAudioDetectedSheet> {
                         Navigator.of(context).pop();
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (widget.parentContext.mounted) {
-                            showAudioOutputSheet(
-                              widget.parentContext,
-                              widget.song,
-                            );
+                            showAudioOutputSheet(widget.parentContext);
                           }
                         });
                       },
