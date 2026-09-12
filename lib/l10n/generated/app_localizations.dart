@@ -2015,7 +2015,7 @@ abstract class AppLocalizations {
   /// No description provided for @pcmIntegerContainer.
   ///
   /// In en, this message translates to:
-  /// **'{bits}-bit container'**
+  /// **'{bits}-bit'**
   String pcmIntegerContainer(int bits);
 
   /// No description provided for @pcmFloatContainer.

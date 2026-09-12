@@ -1021,7 +1021,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String pcmIntegerContainer(int bits) {
-    return '$bits-bit container';
+    return '$bits-bit';
   }
 
   @override

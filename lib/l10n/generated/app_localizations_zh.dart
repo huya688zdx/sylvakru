@@ -1000,7 +1000,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String pcmIntegerContainer(int bits) {
-    return '$bits 位容器';
+    return '$bits-bit';
   }
 
   @override

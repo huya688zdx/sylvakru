@@ -404,7 +404,7 @@
   "playbackOpenFailed": "Playback could not open",
   "audioOutputLoading": "Reading playback output…",
   "sharedOutputInfo": "Player output is PCM sent to the system. The final output may be resampled or processed by audio effects. Container size does not indicate the source's effective bit depth.",
-  "pcmIntegerContainer": "{bits}-bit container",
+  "pcmIntegerContainer": "{bits}-bit",
   "@pcmIntegerContainer": {
     "placeholders": {
       "bits": { "type": "int" }
