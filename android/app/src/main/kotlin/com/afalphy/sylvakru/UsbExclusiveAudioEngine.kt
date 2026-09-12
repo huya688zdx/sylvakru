@@ -2075,7 +2075,16 @@ class UsbExclusiveAudioEngine(
                 )
             }
             val recoveredRaw = readIbassoCurrentBaseRaw(controlConnection)
-            if (previousAppliedTarget == null || recoveredRaw != previousAppliedTarget.baseRaw) {
+            UsbDiagnostics.i(
+                tag,
+                "iBasso frozen-volume recovery read=$recoveredRaw, " +
+                    "previous=${previousAppliedTarget?.baseRaw}, target=${target.baseRaw}.",
+            )
+            // 冻结期间的降低写入可能已经生效；衰减值增大仍在可信音量上限内。
+            // 此处只恢复完整写入流程，不把基础寄存器回读当成 DSD 验证成功。
+            if (previousAppliedTarget == null || recoveredRaw == null ||
+                recoveredRaw < previousAppliedTarget.baseRaw
+            ) {
                 if (isDsd) {
                     if (previousAppliedTarget != null) {
                         // 有本会话可信值：两个寄存器都只降不升时盲写降低命令
@@ -2207,7 +2216,7 @@ class UsbExclusiveAudioEngine(
         if (writeError != null) {
             UsbDiagnostics.w(
                 tag,
-                "iBasso write ACK timed out; verifying the current hardware register.",
+                "iBasso volume write failed: $writeError Verifying the current hardware register.",
             )
         }
         var readBack: Int?
@@ -2285,8 +2294,20 @@ class UsbExclusiveAudioEngine(
             IbassoVolumeVerificationAction.RETRY_READBACK ->
                 error("RETRY_READBACK must be resolved by the bounded verification loop.")
             IbassoVolumeVerificationAction.YIELD_TO_PENDING -> {
-                // 保持上一个已验证目标的授权状态不变，只标记同步未完成；
-                // 挂起的请求马上会重写并重新验证。
+                // 事务开始时已清除活动状态，交给下一笔前必须恢复可信上限。
+                // DSD 仅在两个寄存器都只降不升时允许继续，否则仍由安全门暂停。
+                if (previousAppliedTarget != null) {
+                    if (!isDsd) {
+                        freezeIbassoPcmVolume(
+                            previousAppliedTarget,
+                            effectiveVolumeGainQ16(requestedVolumeGainQ16, requestedReplayGainMilliDb),
+                        )
+                    } else if (appliedTarget.baseRaw >= previousAppliedTarget.baseRaw &&
+                        appliedTarget.dsdRaw >= previousAppliedTarget.dsdRaw
+                    ) {
+                        freezeIbassoDsdVolume(device, previousAppliedTarget)
+                    }
+                }
                 ibassoVerificationFailureCount = 0
                 hardwareVolumeSyncPending = true
                 UsbDiagnostics.w(
