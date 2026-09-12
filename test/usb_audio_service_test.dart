@@ -45,6 +45,61 @@ void main() {
     usbExclusiveVolumeKeyNotifier.value = 0;
   });
 
+  test('共享输出区分源有效位、播放器容器和设备能力', () async {
+    final l10n = AppLocalizationsZh();
+    final service = UsbAudioService(channel: channel, isAndroid: true);
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'getSharedAudioInfo');
+      expect(call.arguments['path'], '/music/source.flac');
+      return {
+        'source': {'sampleRate': 96000, 'validBits': 24, 'channels': 2},
+        'mediaRoutes': [
+          {'type': 'bluetooth_a2dp', 'name': 'Test headset'},
+        ],
+        'systemDefaultSampleRate': 48000,
+      };
+    });
+    final info = await service.getSharedAudioInfo(path: '/music/source.flac');
+    expect((info['source'] as Map)['validBits'], 24);
+    expect(formatSharedOutputDevice(info, l10n), 'Test headset');
+    expect(
+      formatSharedPlayerOutput({
+        'input': 'libFLAC RF64 stream',
+        'current-ao': 'opensles',
+        'audio-out-params/samplerate': '96000',
+        'audio-out-params/format': 's32',
+      }, l10n),
+      'PCM · 96 kHz · ${l10n.pcmIntegerContainer(32)}',
+    );
+  });
+
+  test('共享输出不可用或打开失败时不沿用默认格式', () async {
+    final l10n = AppLocalizationsZh();
+    final staleOutput = <String, Object?>{
+      'input': 'unavailable',
+      'current-ao': 'unavailable',
+      'audio-out-params/samplerate': '48000',
+      'audio-out-params/format': 's16',
+    };
+    expect(formatSharedPlayerOutput(staleOutput, l10n), l10n.unavailable);
+    expect(
+      formatSharedPlayerOutput({
+        ...staleOutput,
+        'playerError': 'No protocol handler',
+      }, l10n),
+      l10n.playbackOpenFailed,
+    );
+    messenger.setMockMethodCallHandler(
+      channel,
+      (_) async => throw PlatformException(code: 'unavailable'),
+    );
+    final service = UsbAudioService(channel: channel, isAndroid: true);
+    expect(
+      formatSharedOutputDevice(await service.getSharedAudioInfo(), l10n),
+      l10n.outputNotMeasured,
+    );
+  });
+
   test(
     'refreshStatus maps USB device capabilities from platform channel',
     () async {

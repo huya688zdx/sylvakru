@@ -77,6 +77,7 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
         usbAudioChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getStatus" -> result.success(getStatus())
+                "getSharedAudioInfo" -> getSharedAudioInfo(call, result)
                 "prepareSharedFlacPlayback" -> prepareSharedFlacPlayback(call, result)
                 "applyPreferredOutput" -> result.success(applyPreferredOutput(call))
                 "clearPreferredOutput" -> result.success(clearPreferredOutput(call))
@@ -686,6 +687,31 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
                 .getOrDefault(false)
             runOnUiThread { result.success(prepared) }
         }, "SylvakruFlacPrepare").start()
+    }
+
+    private fun getSharedAudioInfo(call: MethodCall, result: MethodChannel.Result) {
+        val info = collectAudioOutputDiagnostics().toMutableMap()
+        val path = call.argument<String>("path")
+        val format = call.argument<String>("sourceFormat")
+        if (path == null || !path.startsWith("/") || path.endsWith(".part", true) ||
+            (format?.equals("flac", true) != true && !path.endsWith(".flac", true))
+        ) {
+            result.success(info)
+            return
+        }
+        // 面板只在切换音源时读取完整本地 FLAC 的元数据，不读取样本或更改播放实例。
+        Thread({
+            info["source"] = runCatching {
+                UsbFlacDecoder.open(path).use { decoder ->
+                    mapOf(
+                        "sampleRate" to decoder.sampleRate,
+                        "validBits" to decoder.validBitsPerSample,
+                        "channels" to decoder.channels,
+                    )
+                }
+            }.getOrNull()
+            runOnUiThread { result.success(info) }
+        }, "SylvakruAudioInfo").start()
     }
 
     private fun collectAudioOutputDiagnostics(): Map<String, Any?> {

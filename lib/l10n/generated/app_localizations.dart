@@ -1964,6 +1964,66 @@ abstract class AppLocalizations {
   /// **'Signal output'**
   String get signalOutput;
 
+  /// No description provided for @playerOutput.
+  ///
+  /// In en, this message translates to:
+  /// **'Player output'**
+  String get playerOutput;
+
+  /// No description provided for @outputMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Output mode'**
+  String get outputMode;
+
+  /// No description provided for @sharedOutputMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Shared system output'**
+  String get sharedOutputMode;
+
+  /// No description provided for @outputNotMeasured.
+  ///
+  /// In en, this message translates to:
+  /// **'Not measured'**
+  String get outputNotMeasured;
+
+  /// No description provided for @systemOutputFormat.
+  ///
+  /// In en, this message translates to:
+  /// **'Final system format'**
+  String get systemOutputFormat;
+
+  /// No description provided for @playbackOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Playback could not open'**
+  String get playbackOpenFailed;
+
+  /// No description provided for @audioOutputLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading playback output…'**
+  String get audioOutputLoading;
+
+  /// No description provided for @sharedOutputInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Player output is PCM sent to the system. The final output may be resampled or processed by audio effects. Container size does not indicate the source\'s effective bit depth.'**
+  String get sharedOutputInfo;
+
+  /// No description provided for @pcmIntegerContainer.
+  ///
+  /// In en, this message translates to:
+  /// **'{bits}-bit container'**
+  String pcmIntegerContainer(int bits);
+
+  /// No description provided for @pcmFloatContainer.
+  ///
+  /// In en, this message translates to:
+  /// **'{bits}-bit float'**
+  String pcmFloatContainer(int bits);
+
   /// No description provided for @outputPort.
   ///
   /// In en, this message translates to:

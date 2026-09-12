@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sylvakru/base/app.dart';
+import 'package:sylvakru/base/services/usb_audio_service.dart';
 import 'package:sylvakru/base/widgets/settings_list.dart';
 import 'package:sylvakru/big_picture_view/panels/big_settings_panel.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
@@ -66,8 +67,21 @@ void main() {
   tearDownAll(() => appSupportDirectory.deleteSync(recursive: true));
 
   testWidgets('大图音频输出页通过 Navigator 返回设置列表', (tester) async {
+    final previousStatus = usbAudioStatusNotifier.value;
+    usbAudioStatusNotifier.value = UsbAudioStatus.fromMap({
+      'supported': false,
+      'outputSampleRate': 48000,
+      'outputEncoding': 'pcm_16bit',
+    });
+    addTearDown(() => usbAudioStatusNotifier.value = previousStatus);
     final observer = _RouteObserver();
     await _pumpBigPictureAudioOutput(tester, observer: observer);
+    final l10n = AppLocalizations.of(
+      tester.element(find.byType(AudioOutputSettingsLayer)),
+    );
+    expect(find.text(l10n.playerOutput), findsOneWidget);
+    expect(find.textContaining('48 kHz'), findsNothing);
+    expect(find.textContaining('16-bit'), findsNothing);
     await tester.tap(find.byIcon(Icons.arrow_back_ios_rounded));
     await tester.pumpAndSettle();
 
@@ -122,6 +136,8 @@ void main() {
     await _pumpBigPictureAudioOutput(tester, observer: observer);
     expect(observer.pushCount, 2);
 
+    await tester.ensureVisible(find.text('DSD mode'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('DSD mode'));
     await tester.pumpAndSettle();
 
@@ -141,7 +157,7 @@ void main() {
     await _pumpBigPictureAudioOutput(tester, observer: observer);
     expect(observer.pushCount, 2);
 
-    await tester.drag(find.byType(ListView), const Offset(0, -1200));
+    await tester.ensureVisible(find.text('ReplayGain'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('ReplayGain'));
     await tester.pumpAndSettle();

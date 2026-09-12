@@ -193,6 +193,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   bool isLoading = false;
   // load 的代次号：云端下载/权限弹窗等慢路径期间用户再切歌时，旧的 load 凭它自行作废
   int _loadGeneration = 0;
+  String? _sharedPlaybackError;
+  bool _sharedPlaybackOpenFailed = false;
 
   MyAudioHandler() {
     _publishAndroidPlaybackInfo();
@@ -200,6 +202,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     (_player.platform as NativePlayer).setProperty('sub-auto', 'no');
 
     _player.stream.error.listen((onData) {
+      _sharedPlaybackError = onData;
       logger.output("player error:$onData");
     });
 
@@ -572,15 +575,19 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
   }
 
-  /// 仅在导出诊断时读取 mpv 当前格式，不改变播放器属性或输出策略。
+  /// 面板或诊断只读 mpv 当前格式，不改变播放器属性或输出策略。
   Future<Map<String, Object?>> collectSharedAudioDiagnostics() async {
     final generation = _loadGeneration;
     final snapshot = <String, Object?>{
       'capturedAtMs': DateTime.now().millisecondsSinceEpoch,
       'exclusiveActive': _usbExclusiveActive,
       'playing': _player.state.playing,
+      'loading': isLoading,
+      if (_sharedPlaybackError != null) 'playerError': _sharedPlaybackError,
     };
-    if (_usbExclusiveActive) return snapshot;
+    if (_usbExclusiveActive || isLoading || _sharedPlaybackOpenFailed) {
+      return snapshot;
+    }
     final player = _player.platform as NativePlayer;
     try {
       final path = await player.getProperty('path');
@@ -605,8 +612,12 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     } catch (error) {
       snapshot['error'] = error.toString();
     }
-    if (generation != _loadGeneration || _usbExclusiveActive) {
-      return {'error': 'Playback changed during capture; export again.'};
+    if (generation != _loadGeneration ||
+        _usbExclusiveActive || isLoading || _sharedPlaybackOpenFailed) {
+      return {
+        'error': 'Playback changed during capture; export again.',
+        if (_sharedPlaybackOpenFailed) 'playerError': _sharedPlaybackError,
+      };
     }
     return snapshot;
   }
@@ -618,6 +629,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     Duration? start,
   }) async {
     final generation = _loadGeneration;
+    _sharedPlaybackError = null;
+    _sharedPlaybackOpenFailed = false;
     final shouldPlay = isPlayingNotifier.value;
     if (currentSong.cacheExist) {
       final resource = await usbAudioService.prepareSharedFlacPlayback(
@@ -1338,6 +1351,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         await _stopExclusiveIntentionally();
         _usbExclusiveActive = false;
         _usbExclusivePosition = Duration.zero;
+      }
+      // stop 完成前可能仍读到上一条 PCM；失败标记仅用于屏蔽这段旧的显示数据。
+      if (generation == _loadGeneration) {
+        _sharedPlaybackOpenFailed = true;
+        _sharedPlaybackError = error.toString();
       }
       _player.stop();
       logger.output("[${currentSong.title}] $error");

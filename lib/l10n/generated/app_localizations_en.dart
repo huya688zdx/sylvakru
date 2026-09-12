@@ -995,6 +995,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get signalOutput => 'Signal output';
 
   @override
+  String get playerOutput => 'Player output';
+
+  @override
+  String get outputMode => 'Output mode';
+
+  @override
+  String get sharedOutputMode => 'Shared system output';
+
+  @override
+  String get outputNotMeasured => 'Not measured';
+
+  @override
+  String get systemOutputFormat => 'Final system format';
+
+  @override
+  String get playbackOpenFailed => 'Playback could not open';
+
+  @override
+  String get audioOutputLoading => 'Reading playback output…';
+
+  @override
+  String get sharedOutputInfo =>
+      'Player output is PCM sent to the system. The final output may be resampled or processed by audio effects. Container size does not indicate the source\'s effective bit depth.';
+
+  @override
+  String pcmIntegerContainer(int bits) {
+    return '$bits-bit container';
+  }
+
+  @override
+  String pcmFloatContainer(int bits) {
+    return '$bits-bit float';
+  }
+
+  @override
   String get outputPort => 'Output port';
 
   @override

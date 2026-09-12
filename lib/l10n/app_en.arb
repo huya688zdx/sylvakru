@@ -396,6 +396,26 @@
   "dspPlugin": "DSP plugin",
   "notAttached": "Not attached",
   "signalOutput": "Signal output",
+  "playerOutput": "Player output",
+  "outputMode": "Output mode",
+  "sharedOutputMode": "Shared system output",
+  "outputNotMeasured": "Not measured",
+  "systemOutputFormat": "Final system format",
+  "playbackOpenFailed": "Playback could not open",
+  "audioOutputLoading": "Reading playback output…",
+  "sharedOutputInfo": "Player output is PCM sent to the system. The final output may be resampled or processed by audio effects. Container size does not indicate the source's effective bit depth.",
+  "pcmIntegerContainer": "{bits}-bit container",
+  "@pcmIntegerContainer": {
+    "placeholders": {
+      "bits": { "type": "int" }
+    }
+  },
+  "pcmFloatContainer": "{bits}-bit float",
+  "@pcmFloatContainer": {
+    "placeholders": {
+      "bits": { "type": "int" }
+    }
+  },
   "outputPort": "Output port",
   "bufferingLabel": "Buffering",
   "usbStreamingBuffering": "Buffering…",

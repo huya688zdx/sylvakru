@@ -366,19 +366,24 @@ class _AudioOutputSettingsLayerState extends State<AudioOutputSettingsLayer> {
             ? product
             : null;
         final statusLabel = supported ? _l10n.connected : _l10n.notConnected;
-        final linkLabel = supported
-            ? (exclusive.active ? _l10n.exclusivePlayback : _l10n.running)
+        final linkLabel = exclusive.active
+            ? _l10n.exclusivePlayback
+            : supported
+            ? _l10n.notEnabled
             : _l10n.awaitingConnection;
         final dsdMode = exclusive.format?.contains('(Native)') == true
             ? 'Native'
             : 'DoP';
-        final formatLabel =
-            '${exclusive.active && exclusive.bitDepth == 1 ? dsdMode : 'PCM'} '
-                    '${formatOutputSampleRate(status, _l10n)}'
-                .replaceAll(_l10n.unknown, _l10n.systemDefault);
+        final formatLabel = exclusive.active
+            ? '${exclusive.bitDepth == 1 ? dsdMode : 'PCM'} '
+                  '${formatOutputSampleRate(status, _l10n)}'
+                  .replaceAll(_l10n.unknown, _l10n.systemDefault)
+            : _l10n.outputNotMeasured;
         final depthLabel = exclusive.active && exclusive.bitDepth != null
             ? '${exclusive.bitDepth}-bit'
-            : _compactDepthLabel(status);
+            : exclusive.active
+            ? _compactDepthLabel(status)
+            : _l10n.outputNotMeasured;
 
         return DecoratedBox(
           decoration: BoxDecoration(
@@ -868,6 +873,65 @@ class _AudioOutputSettingsLayerState extends State<AudioOutputSettingsLayer> {
               exclusive.usbBitDepth,
               _l10n,
             ).replaceAll(' bits', '-bit');
+            if (!exclusive.active) {
+              return SharedAudioOutputBuilder(
+                active: viewModeNotifier.value == .bigPicture ||
+                    isTooNarrow(context) ||
+                    (!settingsVisibleNotifier.value && audioOutputVisibleNotifier.value),
+                builder: (context, playback, outputInfo) {
+                  final source = outputInfo['source'] is Map
+                      ? (outputInfo['source'] as Map).cast<String, Object?>()
+                      : const <String, Object?>{};
+                  final sourceSampleRate = source['sampleRate'] is num
+                      ? (source['sampleRate'] as num).toInt()
+                      : song?.samplerate;
+                  final sourceChannels = source['channels'] is num
+                      ? (source['channels'] as num).toInt()
+                      : null;
+                  final sourceBits = source['validBits'] is num
+                      ? (source['validBits'] as num).toInt()
+                      : null;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _formatMetricRow(_l10n.sourceFile, [
+                          _sourceFormatLabel(song),
+                          sourceSampleRate != null && sourceSampleRate > 0
+                              ? formatSampleRate(sourceSampleRate, _l10n)
+                              : _l10n.outputNotMeasured,
+                          sourceChannels != null && sourceChannels > 0
+                              ? '$sourceChannels ch'
+                              : _l10n.outputNotMeasured,
+                          song?.isDsd == true
+                              ? '1-bit'
+                              : sourceBits != null && sourceBits > 0
+                              ? '$sourceBits-bit'
+                              : _l10n.outputNotMeasured,
+                        ]),
+                        const SizedBox(height: 24),
+                        _formatMetricRow(_l10n.playerOutput, [
+                          formatSharedPlayerOutput(playback, _l10n),
+                        ]),
+                        const SizedBox(height: 12),
+                        _formatMetricRow(_l10n.deviceLabel, [
+                          formatSharedOutputDevice(outputInfo, _l10n),
+                        ]),
+                        const SizedBox(height: 12),
+                        _formatMetricRow(_l10n.outputMode, [
+                          _l10n.sharedOutputMode,
+                        ]),
+                        const SizedBox(height: 12),
+                        _formatMetricRow(_l10n.systemOutputFormat, [
+                          _l10n.outputNotMeasured,
+                        ]),
+                      ],
+                    ),
+                  );
+                },
+              );
+            }
             return Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
               child: Column(

@@ -974,6 +974,41 @@ class AppLocalizationsZh extends AppLocalizations {
   String get signalOutput => '信号输出';
 
   @override
+  String get playerOutput => '播放器输出';
+
+  @override
+  String get outputMode => '输出模式';
+
+  @override
+  String get sharedOutputMode => '系统共享输出';
+
+  @override
+  String get outputNotMeasured => '未获取';
+
+  @override
+  String get systemOutputFormat => '系统最终格式';
+
+  @override
+  String get playbackOpenFailed => '播放打开失败';
+
+  @override
+  String get audioOutputLoading => '正在读取播放输出…';
+
+  @override
+  String get sharedOutputInfo =>
+      '播放器输出是交给系统的 PCM，最终输出可能经过重采样和音效处理。容器位数不代表音源有效位深。';
+
+  @override
+  String pcmIntegerContainer(int bits) {
+    return '$bits 位容器';
+  }
+
+  @override
+  String pcmFloatContainer(int bits) {
+    return '$bits 位浮点';
+  }
+
+  @override
   String get outputPort => '输出端口';
 
   @override

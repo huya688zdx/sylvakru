@@ -57,7 +57,8 @@ String formatOutputSampleRate(UsbAudioStatus status, AppLocalizations l10n) {
 String formatOutputDeviceName(UsbAudioStatus status, AppLocalizations l10n) {
   if (!status.supported) {
     final name = status.outputDeviceName?.toLowerCase();
-    if (name == null || name.contains('speaker') || name.contains('扬声器')) {
+    if (name == null) return l10n.outputNotMeasured;
+    if (name.contains('speaker') || name.contains('扬声器')) {
       return l10n.speaker;
     }
     return status.outputDeviceName!;
@@ -188,6 +189,191 @@ Future<UsbAudioStatus> applyExclusiveOutputForSong(
   );
 }
 
+String formatSharedPlayerOutput(
+  Map<String, Object?> playback,
+  AppLocalizations l10n,
+) {
+  if (playback['loading'] == true) return l10n.audioOutputLoading;
+  final rate = int.tryParse('${playback['audio-out-params/samplerate']}');
+  final format = '${playback['audio-out-params/format']}'.replaceFirst(
+    RegExp(r'p$'),
+    '',
+  );
+  final bits = switch (format) {
+    'u8' => 8,
+    's16' => 16,
+    's32' || 'float' => 32,
+    's64' || 'double' => 64,
+    _ => null,
+  };
+  if (playback['input'] == null ||
+      playback['input'] == 'unavailable' ||
+      playback['current-ao'] == null ||
+      playback['current-ao'] == 'unavailable' ||
+      rate == null ||
+      rate <= 0 ||
+      bits == null) {
+    return playback['playerError'] != null
+        ? l10n.playbackOpenFailed
+        : l10n.unavailable;
+  }
+  final depth = format == 'float' || format == 'double'
+      ? l10n.pcmFloatContainer(bits)
+      : l10n.pcmIntegerContainer(bits);
+  return 'PCM · ${formatSampleRate(rate, l10n)} · $depth';
+}
+
+String formatSharedOutputDevice(
+  Map<String, Object?> outputInfo,
+  AppLocalizations l10n,
+) {
+  final routes = outputInfo['mediaRoutes'];
+  if (routes is! List || routes.isEmpty) return l10n.outputNotMeasured;
+  return routes
+      .whereType<Map>()
+      .map((route) {
+        if (route['type'] == 'builtin_speaker') return l10n.speaker;
+        final name = route['name']?.toString();
+        return name == null || name.isEmpty ? l10n.outputNotMeasured : name;
+      })
+      .join(' / ');
+}
+
+// 弹出面板与设置页共用读取周期；离开页面即停止，源文件只在切换时探测一次。
+class SharedAudioOutputBuilder extends StatefulWidget {
+  final bool active;
+  final Widget Function(
+    BuildContext context,
+    Map<String, Object?> playback,
+    Map<String, Object?> outputInfo,
+  )
+  builder;
+
+  const SharedAudioOutputBuilder({
+    super.key,
+    this.active = true,
+    required this.builder,
+  });
+
+  @override
+  State<SharedAudioOutputBuilder> createState() =>
+      _SharedAudioOutputBuilderState();
+}
+
+class _SharedAudioOutputBuilderState extends State<SharedAudioOutputBuilder> {
+  Map<String, Object?> _playback = {};
+  Map<String, Object?> _outputInfo = {};
+  MyAudioMetadata? _sourceSong;
+  String? _sourcePath;
+  bool _refreshing = false;
+  bool _exclusiveActive = usbExclusivePlaybackStateNotifier.value.active;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    currentSongNotifier.addListener(_invalidate);
+    usbExclusivePlaybackStateNotifier.addListener(_exclusiveChanged);
+    _updateTimer();
+  }
+
+  @override
+  void didUpdateWidget(SharedAudioOutputBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) {
+      _playback = {};
+      _outputInfo = {};
+      _sourceSong = null;
+      _sourcePath = null;
+      _updateTimer();
+    }
+  }
+
+  void _updateTimer() {
+    _timer?.cancel();
+    if (widget.active) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) => _refresh());
+      unawaited(_refresh());
+    }
+  }
+
+  void _exclusiveChanged() {
+    final active = usbExclusivePlaybackStateNotifier.value.active;
+    if (active == _exclusiveActive) return;
+    _exclusiveActive = active;
+    _invalidate();
+  }
+
+  void _invalidate() {
+    setState(() {
+      _playback = {};
+      _outputInfo = {};
+      _sourceSong = null;
+      _sourcePath = null;
+    });
+    unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    if (!widget.active || _refreshing || _exclusiveActive) return;
+    _refreshing = true;
+    final song = currentSongNotifier.value;
+    final path = song?.cacheExist == true ? song?.cachePath : song?.path;
+    final probeSource = song != _sourceSong || path != _sourcePath;
+    try {
+      final outputInfo = await usbAudioService.getSharedAudioInfo(
+        path: probeSource ? path : null,
+        sourceFormat: probeSource ? song?.format : null,
+      );
+      if (!mounted ||
+          !widget.active ||
+          song != currentSongNotifier.value ||
+          _exclusiveActive) {
+        return;
+      }
+      final playback = song == null
+          ? <String, Object?>{}
+          : await audioHandler.collectSharedAudioDiagnostics();
+      if (!mounted ||
+          !widget.active ||
+          song != currentSongNotifier.value ||
+          _exclusiveActive) {
+        return;
+      }
+      setState(() {
+        _playback = playback;
+        _outputInfo = {
+          ...outputInfo,
+          'source': probeSource ? outputInfo['source'] : _outputInfo['source'],
+        };
+        _sourceSong = song;
+        _sourcePath = path;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _playback = {};
+          _outputInfo = {};
+        });
+      }
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    currentSongNotifier.removeListener(_invalidate);
+    usbExclusivePlaybackStateNotifier.removeListener(_exclusiveChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      widget.builder(context, _playback, _outputInfo);
+}
+
 class AudioOutputChip extends StatelessWidget {
   final MyAudioMetadata? song;
   final Color color;
@@ -250,7 +436,9 @@ class AudioOutputChip extends StatelessWidget {
                     const SizedBox(width: 9),
                     Flexible(
                       child: Text(
-                        buffering
+                        !exclusive.active
+                            ? '${l10n.sharedOutputMode}  |  $outputName'
+                            : buffering
                             ? '${l10n.usbStreamingBuffering}  |  $bitDepth  |  $outputName'
                             : '$outputRate  |  $bitDepth  |  $outputName',
                         maxLines: 1,
@@ -577,7 +765,14 @@ class _AudioOutputSheetState extends State<_AudioOutputSheet> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SharedAudioOutputBuilder(builder: _buildOutput);
+
+  Widget _buildOutput(
+    BuildContext context,
+    Map<String, Object?> playback,
+    Map<String, Object?> outputInfo,
+  ) {
     final l10n = AppLocalizations.of(context);
     final foreground = lyricsPageForegroundColor.value;
     final highlight = lyricsPageHighlightTextColor.value;
@@ -596,6 +791,10 @@ class _AudioOutputSheetState extends State<_AudioOutputSheet> {
         final status = usbAudioStatusNotifier.value;
         final exclusive = usbExclusivePlaybackStateNotifier.value;
         final replayGain = replayGainPlaybackStateNotifier.value;
+        final song = exclusive.active ? widget.song : currentSongNotifier.value;
+        final source = outputInfo['source'] is Map
+            ? outputInfo['source'] as Map
+            : const {};
         final showPcmDepths = exclusive.active && exclusive.bitDepth != 1;
         return Padding(
           padding: EdgeInsets.only(
@@ -649,7 +848,9 @@ class _AudioOutputSheetState extends State<_AudioOutputSheet> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              formatOutputDeviceName(status, l10n),
+                              exclusive.active
+                                  ? formatOutputDeviceName(status, l10n)
+                                  : formatSharedOutputDevice(outputInfo, l10n),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(color: muted, fontSize: 13),
@@ -668,22 +869,34 @@ class _AudioOutputSheetState extends State<_AudioOutputSheet> {
                     surface: surface,
                     border: border,
                     rows: [
-                      _InfoRow(
-                        l10n.fileLabel,
-                        _sourcePathLabel(widget.song, l10n),
-                      ),
+                      _InfoRow(l10n.fileLabel, _sourcePathLabel(song, l10n)),
                       _InfoRow(
                         l10n.inputSampleRate,
-                        formatSampleRate(widget.song?.samplerate, l10n),
+                        formatSampleRate(
+                          source['sampleRate'] as int? ?? song?.samplerate,
+                          l10n,
+                        ),
                       ),
                       _InfoRow(
                         l10n.format,
-                        widget.song?.format?.toUpperCase() ?? l10n.unknown,
+                        song?.format?.toUpperCase() ?? l10n.unknown,
                       ),
                       _InfoRow(
                         l10n.bitrate,
-                        formatBitrate(widget.song?.bitrate, l10n),
+                        formatBitrate(song?.bitrate, l10n),
                       ),
+                      if (!exclusive.active)
+                        _InfoRow(
+                          l10n.sourceBitDepth,
+                          song?.isDsd == true
+                              ? '1 bit'
+                              : source['validBits'] is int
+                              ? formatUsbBitDepth(
+                                  source['validBits'] as int,
+                                  l10n,
+                                )
+                              : l10n.outputNotMeasured,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -695,56 +908,75 @@ class _AudioOutputSheetState extends State<_AudioOutputSheet> {
                     surface: surface,
                     border: border,
                     rows: [
-                      if (exclusive.active && exclusive.buffering)
+                      if (!exclusive.active) ...[
                         _InfoRow(
-                          l10n.bufferingLabel,
-                          l10n.usbStreamingBufferingDetail,
+                          l10n.playerOutput,
+                          formatSharedPlayerOutput(playback, l10n),
                         ),
-                      _InfoRow(l10n.outputPort, _outputPortLabel(status, l10n)),
-                      _InfoRow(
-                        l10n.outputSampleRate,
-                        formatOutputSampleRate(status, l10n),
-                      ),
-                      _InfoRow(
-                        l10n.encoding,
-                        _outputEncodingLabel(status, l10n),
-                      ),
-                      if (showPcmDepths)
                         _InfoRow(
-                          l10n.sourceBitDepth,
-                          formatUsbBitDepth(exclusive.sourceBitDepth, l10n),
+                          l10n.deviceLabel,
+                          formatSharedOutputDevice(outputInfo, l10n),
                         ),
-                      if (showPcmDepths)
+                        _InfoRow(l10n.outputMode, l10n.sharedOutputMode),
                         _InfoRow(
-                          l10n.decodedBitDepth,
-                          formatUsbBitDepth(exclusive.decodedBitDepth, l10n),
+                          l10n.systemOutputFormat,
+                          l10n.outputNotMeasured,
                         ),
-                      if (showPcmDepths)
+                      ] else ...[
+                        if (exclusive.active && exclusive.buffering)
+                          _InfoRow(
+                            l10n.bufferingLabel,
+                            l10n.usbStreamingBufferingDetail,
+                          ),
                         _InfoRow(
-                          l10n.usbSlotBitDepth,
-                          formatUsbBitDepth(exclusive.usbBitDepth, l10n),
+                          l10n.outputPort,
+                          _outputPortLabel(status, l10n),
                         ),
-                      _InfoRow(
-                        'Bit-perfect',
-                        _bitPerfectStatusLabel(
-                          status,
-                          l10n,
-                          showSyncPending: _debouncedSyncPending(
-                            exclusive.active &&
-                                exclusive.hardwareVolumeSyncPending,
+                        _InfoRow(
+                          l10n.outputSampleRate,
+                          formatOutputSampleRate(status, l10n),
+                        ),
+                        _InfoRow(
+                          l10n.encoding,
+                          _outputEncodingLabel(status, l10n),
+                        ),
+                        if (showPcmDepths)
+                          _InfoRow(
+                            l10n.sourceBitDepth,
+                            formatUsbBitDepth(exclusive.sourceBitDepth, l10n),
+                          ),
+                        if (showPcmDepths)
+                          _InfoRow(
+                            l10n.decodedBitDepth,
+                            formatUsbBitDepth(exclusive.decodedBitDepth, l10n),
+                          ),
+                        if (showPcmDepths)
+                          _InfoRow(
+                            l10n.usbSlotBitDepth,
+                            formatUsbBitDepth(exclusive.usbBitDepth, l10n),
+                          ),
+                        _InfoRow(
+                          'Bit-perfect',
+                          _bitPerfectStatusLabel(
+                            status,
+                            l10n,
+                            showSyncPending: _debouncedSyncPending(
+                              exclusive.active &&
+                                  exclusive.hardwareVolumeSyncPending,
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                       _InfoRow(
                         l10n.replayGain,
                         formatReplayGainStatus(replayGain, l10n),
                       ),
                     ],
                   ),
-                  if (!status.supported) ...[
+                  if (!exclusive.active) ...[
                     const SizedBox(height: 14),
                     Text(
-                      l10n.noUsbDacInfo,
+                      l10n.sharedOutputInfo,
                       style: TextStyle(
                         color: muted,
                         fontSize: 12,

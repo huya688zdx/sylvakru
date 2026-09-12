@@ -69,6 +69,24 @@ class UsbAudioService {
     return _invokeStatus('getStatus');
   }
 
+  Future<Map<String, Object?>> getSharedAudioInfo({
+    String? path,
+    String? sourceFormat,
+  }) async {
+    if (!_isAndroid) return {};
+    try {
+      return await _channel.invokeMapMethod<String, Object?>(
+            'getSharedAudioInfo',
+            {'path': ?path, 'sourceFormat': ?sourceFormat},
+          ) ??
+          {};
+    } on PlatformException {
+      return {};
+    } on MissingPluginException {
+      return {};
+    }
+  }
+
   Future<String> prepareSharedFlacPlayback({
     required int playerHandle,
     required String path,
