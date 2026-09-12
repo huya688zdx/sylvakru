@@ -1506,18 +1506,15 @@ class UsbExclusiveAudioEngine(
                     }
                     if (hardwareVolumeActive) {
                         val appliedTarget = ibassoLastAppliedTarget ?: volumeTarget
-                        val actual = ibassoActualEventGainQ16(
-                            appliedTarget.baseRaw,
-                            isDsd,
-                            dsdGainCompensationDb,
-                        )
+                        val actualRaw = if (isDsd) appliedTarget.dsdRaw else appliedTarget.baseRaw
+                        val actualGainQ16 = IbassoHidVolumeProtocol.rawToLinearGainQ16(actualRaw)
                         hardwareVolumeProtocol = protocolSelection.protocol.id
-                        hardwareVolumeRaw = actual.raw
-                        hardwareVolumeGainQ16 = actual.gainQ16
+                        hardwareVolumeRaw = actualRaw
+                        hardwareVolumeGainQ16 = actualGainQ16
                         ibassoHandoffBaseRaw?.let { baseRaw ->
                             pendingHardwareVolumeEvent = hardwareVolumeEventMap(
                                 protocolSelection.protocol.id,
-                                actual.gainQ16,
+                                actualGainQ16,
                                 baseRaw,
                                 baseRaw,
                                 isDsd,
@@ -2057,7 +2054,8 @@ class UsbExclusiveAudioEngine(
         val controlConnection = ibassoVolumeConnection
             ?: return "iBasso control connection is unavailable."
 
-        if (hardwareVolumeFrozen) {
+        val recoveringFrozenVolume = hardwareVolumeFrozen
+        if (recoveringFrozenVolume) {
             hardwareVolumeSyncPending = true
             if (currentState["active"] == true) {
                 updateState(
@@ -2110,7 +2108,8 @@ class UsbExclusiveAudioEngine(
                 }
                 return "iBasso hardware volume synchronization is still frozen."
             }
-            acceptVerifiedIbassoTarget(device, previousAppliedTarget, isDsd)
+            // 基础寄存器回读只能证明 reader 恢复；完整重写后才能确认 DSD 寄存器。
+            hardwareVolumeFrozen = false
         }
 
         val shouldReadInitialVolume = shouldReadInitialHardwareVolume(
@@ -2168,7 +2167,7 @@ class UsbExclusiveAudioEngine(
             shouldSkipIbassoVolumeWrite(
                 target = appliedTarget,
                 previousTarget = previousAppliedTarget,
-                readbackVerified = ibassoReaderHealth.readbackVerified,
+                readbackVerified = ibassoReaderHealth.readbackVerified && !recoveringFrozenVolume,
             )
         ) {
             UsbDiagnostics.i(
@@ -2254,7 +2253,8 @@ class UsbExclusiveAudioEngine(
             verificationAction = ibassoVolumeVerificationAction(
                 targetRaw = appliedTarget.baseRaw,
                 previousRaw = previousAppliedTarget?.baseRaw,
-                readbackRaw = readBack,
+                // 任一写包失败时，未变化的基础值不能证明整组 PCM/DSD 寄存器生效。
+                readbackRaw = readBack.takeIf { writeError == null },
                 failureCount = ibassoVerificationFailureCount,
                 isDsd = isDsd,
                 hasPendingRequest = synchronized(volumeCommandLock) {
@@ -2340,11 +2340,7 @@ class UsbExclusiveAudioEngine(
         target: UsbVolumeTarget,
         isDsd: Boolean,
     ) {
-        val actual = ibassoActualEventGainQ16(
-            target.baseRaw,
-            isDsd,
-            dsdGainCompensationDb,
-        )
+        val actualRaw = if (isDsd) target.dsdRaw else target.baseRaw
         ibassoLastAppliedTarget = target
         ibassoLastAppliedDeviceId = device.deviceId
         synchronized(ibassoReaderHealthLock) {
@@ -2353,8 +2349,8 @@ class UsbExclusiveAudioEngine(
         hardwareVolumeActive = true
         volumeControlEnabled = false
         hardwareVolumeProtocol = IbassoHidVolumeProtocol.id
-        hardwareVolumeRaw = actual.raw
-        hardwareVolumeGainQ16 = actual.gainQ16
+        hardwareVolumeRaw = actualRaw
+        hardwareVolumeGainQ16 = IbassoHidVolumeProtocol.rawToLinearGainQ16(actualRaw)
         hardwareVolumeSyncPending = false
         hardwareVolumeFrozen = false
         ibassoVerificationFailureCount = 0
@@ -2403,18 +2399,13 @@ class UsbExclusiveAudioEngine(
     // 本会话可信值上继续播放（对外报可信值，实际只可能更低）。DSD 没有数字
     // 兜底可用，升音量请求在冻结恢复路径里被忽略，直到回读恢复才解冻。
     private fun freezeIbassoDsdVolume(device: UsbDevice, trustedTarget: UsbVolumeTarget) {
-        val actual = ibassoActualEventGainQ16(
-            trustedTarget.baseRaw,
-            isDsd = true,
-            dsdCompensationDb = dsdGainCompensationDb,
-        )
         ibassoLastAppliedTarget = trustedTarget
         ibassoLastAppliedDeviceId = device.deviceId
         hardwareVolumeActive = true
         volumeControlEnabled = false
         hardwareVolumeProtocol = IbassoHidVolumeProtocol.id
-        hardwareVolumeRaw = actual.raw
-        hardwareVolumeGainQ16 = actual.gainQ16
+        hardwareVolumeRaw = trustedTarget.dsdRaw
+        hardwareVolumeGainQ16 = IbassoHidVolumeProtocol.rawToLinearGainQ16(trustedTarget.dsdRaw)
         hardwareVolumeSyncPending = false
         hardwareVolumeFrozen = true
     }
