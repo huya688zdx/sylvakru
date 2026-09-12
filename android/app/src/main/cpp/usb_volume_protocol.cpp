@@ -310,9 +310,10 @@ IbassoVolumeVerificationAction ibassoVolumeVerificationAction(
     // DSD 无数字兜底，但本会话已有可信硬件值且两个寄存器目标都只降不升时，
     // 已发出的写入即使生效也只会更小声：冻结在可信值上继续播放，不再暂停；
     // 任一寄存器要升（含 DSD 增益补偿变化导致）仍严格暂停。
-    if (is_dsd && previous_raw != nullptr && target_raw <= *previous_raw &&
+    // 衰减寄存器越大越小声，两个目标都不得小于可信旧值。
+    if (is_dsd && previous_raw != nullptr && target_raw >= *previous_raw &&
         target_dsd_raw != nullptr && previous_dsd_raw != nullptr &&
-        *target_dsd_raw <= *previous_dsd_raw) {
+        *target_dsd_raw >= *previous_dsd_raw) {
         return IbassoVolumeVerificationAction::kFreezeDsd;
     }
     if (is_dsd) {

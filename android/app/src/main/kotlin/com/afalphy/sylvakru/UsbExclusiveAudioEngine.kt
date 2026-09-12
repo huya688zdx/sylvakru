@@ -2089,8 +2089,8 @@ class UsbExclusiveAudioEngine(
                         // （不生效也只是维持原音量），继续冻结播放；升音量
                         // 请求直接忽略，绝不未经验证写高
                         if (
-                            target.baseRaw < previousAppliedTarget.baseRaw &&
-                            target.dsdRaw <= previousAppliedTarget.dsdRaw
+                            target.baseRaw >= previousAppliedTarget.baseRaw &&
+                            target.dsdRaw >= previousAppliedTarget.dsdRaw
                         ) {
                             transferIbassoVolumeTarget(controlConnection, target)
                         }

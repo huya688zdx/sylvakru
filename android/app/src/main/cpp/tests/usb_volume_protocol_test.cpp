@@ -209,16 +209,21 @@ void verifiesIbassoWriteBeforeChangingHardwareAuthority() {
 void freezesDsdAtTheTrustedTargetOnlyWhenBothRegistersDoNotRise() {
     const int previous = 102;
     const int previous_dsd = 100;
-    const int target_dsd_lower = 98;
-    const int target_dsd_higher = 102;
+    const int target_dsd_lower = 102;
+    const int target_dsd_higher = 98;
+    // 衰减寄存器增大才是降低音量，先用设备音量表校验测试方向。
+    assert(sylvakru::ibassoRawToLinearGainQ16(104) <
+        sylvakru::ibassoRawToLinearGainQ16(previous));
+    assert(sylvakru::ibassoRawToLinearGainQ16(target_dsd_lower) <
+        sylvakru::ibassoRawToLinearGainQ16(previous_dsd));
     assert(sylvakru::ibassoVolumeVerificationAction(
-        100, &previous, nullptr, 3, true, false, &target_dsd_lower, &previous_dsd) ==
+        104, &previous, nullptr, 3, true, false, &target_dsd_lower, &previous_dsd) ==
         IbassoVolumeVerificationAction::kFreezeDsd);
     assert(sylvakru::ibassoVolumeVerificationAction(
-        104, &previous, nullptr, 3, true, false, &target_dsd_higher, &previous_dsd) ==
+        100, &previous, nullptr, 3, true, false, &target_dsd_higher, &previous_dsd) ==
         IbassoVolumeVerificationAction::kPauseDsd);
     assert(sylvakru::ibassoVolumeVerificationAction(
-        100, &previous, nullptr, 3, true, false, &target_dsd_higher, &previous_dsd) ==
+        104, &previous, nullptr, 3, true, false, &target_dsd_higher, &previous_dsd) ==
         IbassoVolumeVerificationAction::kPauseDsd);
     assert(sylvakru::ibassoVolumeVerificationAction(
         100, nullptr, nullptr, 3, true, false, &target_dsd_lower, nullptr) ==
