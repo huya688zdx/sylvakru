@@ -215,17 +215,34 @@ int openSharedFlac(void*, char* uri, MpvStreamInfo* info) {
     }
     const auto& source = stream->streamInfo();
     __android_log_print(ANDROID_LOG_INFO, "SylvakruFlac",
-        "Shared playback decoder=libFLAC source=%uHz/%ubit channels=%u",
-        source.sample_rate, source.valid_bits_per_sample, source.channels);
+        "FLAC source stream=%p evidence=STREAMINFO sampleRate=%u validBits=%u channels=%u totalFrames=%llu",
+        static_cast<void*>(stream), source.sample_rate, source.valid_bits_per_sample, source.channels,
+        static_cast<unsigned long long>(source.total_frames));
     info->cookie = stream;
     info->read_fn = [](void* cookie, char* buffer, uint64_t size) {
-        return static_cast<sylvakru::FlacPcmStream*>(cookie)->read(buffer, size);
+        auto* stream = static_cast<sylvakru::FlacPcmStream*>(cookie);
+        const bool first_decode = stream->decodedFrames() == 0;
+        const auto count = stream->read(buffer, size);
+        // 只有真实读到样本才记录解码 PCM；协议注册与文件头探测不算解码播放。
+        if (first_decode && stream->decodedFrames() > 0) {
+            const auto& source = stream->streamInfo();
+            __android_log_print(ANDROID_LOG_INFO, "SylvakruFlac",
+                "Native decoded PCM stream=%p decoder=libFLAC sampleRate=%u channels=%u "
+                "format=s32le containerBits=32 validBits=%u alignment=LSB interleaved=true "
+                "mpvInput=RF64 pcmContainerBits=%d pcmAlignment=MSB",
+                cookie, source.sample_rate, source.channels, source.valid_bits_per_sample,
+                stream->pcmContainerBits());
+        }
+        return count;
     };
     info->seek_fn = [](void* cookie, int64_t offset) {
         return static_cast<sylvakru::FlacPcmStream*>(cookie)->seek(offset);
     };
     info->size_fn = [](void* cookie) { return static_cast<sylvakru::FlacPcmStream*>(cookie)->size(); };
-    info->close_fn = [](void* cookie) { delete static_cast<sylvakru::FlacPcmStream*>(cookie); };
+    info->close_fn = [](void* cookie) {
+        __android_log_print(ANDROID_LOG_INFO, "SylvakruFlac", "FLAC stream=%p closed", cookie);
+        delete static_cast<sylvakru::FlacPcmStream*>(cookie);
+    };
     info->cancel_fn = [](void* cookie) { static_cast<sylvakru::FlacPcmStream*>(cookie)->cancel(); };
     return 0;
 }

@@ -14,6 +14,8 @@ public:
     int64_t read(char* output, uint64_t capacity);
     int64_t seek(int64_t offset);
     int64_t size() const { return size_; }
+    int pcmContainerBits() const { return sample_bytes_ * 8; }
+    uint64_t decodedFrames() const { return decoded_frames_; }
     void cancel() { cancelled_.store(true); }
     const FlacStreamInfo& streamInfo() const { return decoder_.streamInfo(); }
 
@@ -26,6 +28,7 @@ private:
     int sample_bytes_ = 0;
     int64_t position_ = 0;
     int64_t size_ = 0;
+    uint64_t decoded_frames_ = 0;
     std::atomic<bool> cancelled_{false};
 };
 

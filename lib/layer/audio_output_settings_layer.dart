@@ -1353,7 +1353,9 @@ class _AudioOutputSettingsLayerState extends State<AudioOutputSettingsLayer> {
 
     String report;
     try {
-      report = await usbAudioService.getDiagnosticsReport();
+      report = await usbAudioService.getDiagnosticsReport(
+        sharedPlayback: await audioHandler.collectSharedAudioDiagnostics(),
+      );
     } catch (error) {
       report = 'Sylvakru USB Diagnostics Report v1\n\nGeneration failed: $error';
     }

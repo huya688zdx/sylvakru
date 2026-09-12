@@ -499,6 +499,7 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
             "diagnostics" to usbExclusiveAudioEngine.collectDiagnostics(usbManager, device),
             "lastProbe" to lastExclusiveProbeResult,
             "systemStatus" to getStatus(),
+            "audioOutput" to collectAudioOutputDiagnostics(),
             "nativeLogcat" to readNativeLogcat(),
             "logs" to UsbDiagnostics.snapshot(),
         )
@@ -533,7 +534,8 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
         return try {
             val pid = android.os.Process.myPid()
             val process = ProcessBuilder(
-                "logcat", "-d", "-v", "time", "--pid=$pid", "-s", "SylvakruUsbExclusive:*",
+                "logcat", "-d", "-v", "time", "--pid=$pid", "-s",
+                "SylvakruUsbExclusive:*", "SylvakruFlac:*",
             ).redirectErrorStream(true).start()
             val lines = process.inputStream.bufferedReader().use { it.readLines() }
             process.waitFor()
@@ -684,6 +686,49 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
                 .getOrDefault(false)
             runOnUiThread { result.success(prepared) }
         }, "SylvakruFlacPrepare").start()
+    }
+
+    private fun collectAudioOutputDiagnostics(): Map<String, Any?> {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        // 媒体策略路由与设备能力分开记录，不把连接列表或默认扬声器当作实际 track。
+        val routes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            audioManager.getAudioDevicesForAttributes(mediaAudioAttributes())
+        } else {
+            emptyList()
+        }
+        return mapOf(
+            "capturedAtMs" to System.currentTimeMillis(),
+            "routeEvidence" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                "AudioManager.getAudioDevicesForAttributes(USAGE_MEDIA); policy route, not track readback"
+            } else {
+                "unknown; media policy route API requires Android 13"
+            },
+            "bluetoothRouted" to routes.takeIf { it.isNotEmpty() }?.any {
+                it.type in listOf(
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    AudioDeviceInfo.TYPE_BLE_HEADSET,
+                    AudioDeviceInfo.TYPE_BLE_SPEAKER,
+                    AudioDeviceInfo.TYPE_BLE_BROADCAST,
+                )
+            },
+            "mediaRoutes" to routes.map {
+                mapOf(
+                    "id" to it.id,
+                    "type" to audioDeviceTypeName(it.type),
+                    "typeId" to it.type,
+                    "name" to it.productName.toString(),
+                    "supportedSampleRates" to it.sampleRates.toList(),
+                    "supportedEncodings" to it.encodings.map { encoding -> encodingName(encoding) },
+                    "supportedChannelCounts" to it.channelCounts.toList(),
+                )
+            },
+            "capabilityEvidence" to "AudioDeviceInfo supported formats; empty arrays mean arbitrary support, not active PCM",
+            "systemDefaultSampleRate" to AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC),
+            "systemDefaultEvidence" to "AudioTrack.getNativeOutputSampleRate(STREAM_MUSIC); not current track or HAL",
+            "hardwareOutputFormat" to "unknown; verify active track and HAL with adb dumpsys media.audio_flinger",
+            "bluetoothCodec" to "unknown; verify negotiated codec with adb dumpsys bluetooth_manager",
+        )
     }
 
     private fun getStatus(
@@ -1056,6 +1101,9 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "builtin_speaker"
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "bluetooth_a2dp"
             AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bluetooth_sco"
+            AudioDeviceInfo.TYPE_BLE_HEADSET -> "ble_headset"
+            AudioDeviceInfo.TYPE_BLE_SPEAKER -> "ble_speaker"
+            AudioDeviceInfo.TYPE_BLE_BROADCAST -> "ble_broadcast"
             AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "wired_headphones"
             AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired_headset"
             else -> "unknown"

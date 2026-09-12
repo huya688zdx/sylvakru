@@ -152,6 +152,14 @@ void verifiesTruncatedFileFailsLoudly() {
 void verifiesSharedPcmStream() {
     sylvakru::FlacPcmStream stream;
     assert(stream.open(testData("pcm24_stereo.flac")).ok());
+    assert(stream.streamInfo().valid_bits_per_sample == 24);
+    assert(stream.pcmContainerBits() == 24);
+    assert(stream.decodedFrames() == 0);
+    // 只探测 RF64 头时尚未解码样本，诊断不能提前声称 PCM 已输出。
+    char header[80];
+    assert(stream.read(header, sizeof(header)) == sizeof(header));
+    assert(stream.decodedFrames() == 0);
+    assert(stream.seek(0) == 0);
     std::vector<uint8_t> bytes;
     char chunk[37];
     int64_t count;
@@ -159,6 +167,7 @@ void verifiesSharedPcmStream() {
         bytes.insert(bytes.end(), chunk, chunk + count);
     }
     assert(count == 0);
+    assert(stream.decodedFrames() == 256);
     assert(stream.size() == 80 + 256 * 2 * 3);
     assert(bytes.size() == static_cast<size_t>(stream.size()));
     assert(std::memcmp(bytes.data(), "RF64", 4) == 0);

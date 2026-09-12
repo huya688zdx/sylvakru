@@ -828,14 +828,37 @@ void main() {
                 {'id': 10, 'name': 'FiiO KA13'},
               ],
             },
-            'nativeLogcat': ['01-01 00:00:00.000 I native line'],
+            'audioOutput': {
+              'routeEvidence': 'media policy route, not track readback',
+              'bluetoothRouted': true,
+              'mediaRoutes': [
+                {'type': 'bluetooth_a2dp', 'supportedEncodings': ['pcm_16bit']},
+              ],
+              'systemDefaultSampleRate': 48000,
+              'hardwareOutputFormat': 'unknown',
+              'bluetoothCodec': 'unknown',
+            },
+            'nativeLogcat': [
+              '01-01 00:00:00.000 I native line',
+              'I SylvakruFlac: FLAC source stream=0x1 evidence=STREAMINFO sampleRate=96000 validBits=24 channels=2',
+              'I SylvakruFlac: Native decoded PCM stream=0x1 format=s32le containerBits=32 validBits=24 pcmContainerBits=24',
+            ],
             'logs': ['00:00:00.000 I/UsbExclusiveAudioEngine: open ok'],
           };
         }
         throw PlatformException(code: 'unexpected_method');
       });
 
-      final report = await service.getDiagnosticsReport();
+      final report = await service.getDiagnosticsReport(
+        sharedPlayback: {
+          'input': 'libFLAC RF64 stream',
+          'current-ao': 'opensles',
+          'audio-params/format': 's32',
+          'audio-params/samplerate': '96000',
+          'audio-out-params/format': 'float',
+          'audio-out-params/samplerate': '96000',
+        },
+      );
 
       expect(report, startsWith('Sylvakru USB Diagnostics Report v2'));
       expect(report, contains('App version'));
@@ -857,6 +880,17 @@ void main() {
       expect(report, contains('replayGainMilliDb=0'));
       expect(report, contains('open ok'));
       expect(report, contains('native line'));
+      expect(report, contains('evidence=STREAMINFO sampleRate=96000 validBits=24'));
+      expect(report, contains('format=s32le containerBits=32 validBits=24'));
+      expect(report, contains('pcmContainerBits=24'));
+      expect(report, contains('current-ao=opensles'));
+      expect(report, contains('audio-out-params/format=float'));
+      expect(report, contains('audio-out-params/samplerate=96000'));
+      expect(report, contains('bluetoothRouted=true'));
+      expect(report, contains('bluetooth_a2dp'));
+      expect(report, contains('systemDefaultSampleRate=48000'));
+      expect(report, contains('hardwareOutputFormat=unknown'));
+      expect(report, contains('bluetoothCodec=unknown'));
     },
   );
 
@@ -936,5 +970,13 @@ void main() {
     expect(report, startsWith('Sylvakru USB Diagnostics Report v2'));
     expect(report, contains('No USB audio device detected.'));
     expect(report, contains('Descriptors unavailable.'));
+    expect(report, contains('## Shared playback PCM / audio API output\n'));
+    expect(report, contains('## Current media route / system output\n- none'));
+    expect(
+      report,
+      contains('Missing route, native PCM or hardware output data is unknown'),
+    );
+    expect(report, isNot(contains('bluetoothRouted=true')));
+    expect(report, isNot(contains('audio-out-params/format=pcm_16bit')));
   });
 }

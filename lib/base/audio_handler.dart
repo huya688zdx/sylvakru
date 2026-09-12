@@ -572,6 +572,45 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
   }
 
+  /// 仅在导出诊断时读取 mpv 当前格式，不改变播放器属性或输出策略。
+  Future<Map<String, Object?>> collectSharedAudioDiagnostics() async {
+    final generation = _loadGeneration;
+    final snapshot = <String, Object?>{
+      'capturedAtMs': DateTime.now().millisecondsSinceEpoch,
+      'exclusiveActive': _usbExclusiveActive,
+      'playing': _player.state.playing,
+    };
+    if (_usbExclusiveActive) return snapshot;
+    final player = _player.platform as NativePlayer;
+    try {
+      final path = await player.getProperty('path');
+      snapshot['input'] = path.isEmpty
+          ? 'unavailable'
+          : path.startsWith('sylvakru-flac://')
+          ? 'libFLAC RF64 stream'
+          : 'ordinary mpv input';
+      for (final property in const [
+        'current-ao',
+        'audio-codec-name',
+        'audio-params/format',
+        'audio-params/samplerate',
+        'audio-params/channel-count',
+        'audio-out-params/format',
+        'audio-out-params/samplerate',
+        'audio-out-params/channel-count',
+      ]) {
+        final value = await player.getProperty(property);
+        snapshot[property] = value.isEmpty ? 'unavailable' : value;
+      }
+    } catch (error) {
+      snapshot['error'] = error.toString();
+    }
+    if (generation != _loadGeneration || _usbExclusiveActive) {
+      return {'error': 'Playback changed during capture; export again.'};
+    }
+    return snapshot;
+  }
+
   /// 用系统输出（media_kit）打开歌曲并按当前播放状态起播。
   /// 供 load() 非独占分支与独占意外中断回退续播复用。
   Future<void> _openPlayerMedia(

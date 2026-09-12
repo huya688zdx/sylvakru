@@ -284,7 +284,9 @@ class UsbAudioService {
 
   /// 生成一键复制/导出的 DAC 适配诊断报告（纯文本 Markdown）。
   /// 报告不要求 DAC 在线：未连接设备时也会带上环境、偏好与最近日志。
-  Future<String> getDiagnosticsReport() async {
+  Future<String> getDiagnosticsReport({
+    Map<String, Object?>? sharedPlayback,
+  }) async {
     Map<String, Object?> native = const {};
     if (_isAndroid) {
       try {
@@ -297,7 +299,10 @@ class UsbAudioService {
         native = {'error': error.message};
       }
     }
-    return buildUsbDiagnosticsReport(native, platformSupported: _isAndroid);
+    return buildUsbDiagnosticsReport(
+      {...native, 'sharedPlayback': sharedPlayback},
+      platformSupported: _isAndroid,
+    );
   }
 
   Future<UsbAudioStatus> _invokeStatus(
@@ -1174,6 +1179,20 @@ String buildUsbDiagnosticsReport(
     buffer.writeln('- No USB audio output device.');
   }
 
+  // 普通音频链路按采集层次分别输出，能力列表不代表实际播放格式。
+  buffer.writeln();
+  buffer.writeln('## Shared playback PCM / audio API output');
+  buffer.writeln(
+    '> audio-params: mpv decoder output; audio-out-params: PCM written to the audio API, not final HAL/DAC or Bluetooth codec.',
+  );
+  _writeDiagnosticsSnapshot(buffer, native['sharedPlayback']);
+  buffer.writeln();
+  buffer.writeln('## Current media route / system output');
+  _writeDiagnosticsSnapshot(buffer, native['audioOutput']);
+  buffer.writeln(
+    '> Missing route, native PCM or hardware output data is unknown; never infer it from device capabilities.',
+  );
+
   // 8. Preferences snapshot
   buffer.writeln();
   buffer.writeln('## Preferences snapshot');
@@ -1220,7 +1239,10 @@ String buildUsbDiagnosticsReport(
   final nativeLog = native['nativeLogcat'];
   if (nativeLog is List && nativeLog.isNotEmpty) {
     buffer.writeln();
-    buffer.writeln('### native logcat (SylvakruUsbExclusive)');
+    buffer.writeln('### native logcat (SylvakruUsbExclusive / SylvakruFlac)');
+    buffer.writeln(
+      '> FLAC source: STREAMINFO; Native decoded PCM: first successful sample read, including RF64 container bits. Timestamped history: match stream open/read/close; read-ahead is not proof of audible output.',
+    );
     _writeLogLines(buffer, nativeLog);
   }
 

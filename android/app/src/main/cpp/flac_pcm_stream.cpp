@@ -41,6 +41,7 @@ FlacResult FlacPcmStream::open(const std::string& path) {
     pcm_.clear();
     pcm_offset_ = 0;
     position_ = 0;
+    decoded_frames_ = 0;
     size_ = static_cast<int64_t>(header_.size() + data_size);
     cancelled_.store(false);
     return {};
@@ -61,6 +62,7 @@ int64_t FlacPcmStream::read(char* output, uint64_t capacity) {
         const auto decoded = decoder_.readFrames(samples_.data(), 4096);
         if (!decoded.ok()) return -1;
         if (decoded.frames == 0) return position_ == size_ ? 0 : -1;
+        decoded_frames_ += decoded.frames;
         const auto& info = decoder_.streamInfo();
         const size_t count = decoded.frames * info.channels;
         pcm_.resize(count * sample_bytes_);
