@@ -5385,9 +5385,10 @@ class UsbExclusiveAudioEngine(
         reportSelection: Boolean = false,
     ): OutputTarget? {
         // native DSD 要求 RAW_DATA alt（bmFormats D31）；quirk 驱动的设备描述符
-        // 可能不声明，此时调用方传 false、靠 bitDepth 匹配 subslot
+        // 可能不声明，此时调用方传 false、靠 bitDepth 匹配 subslot。
+        // PCM/DoP 必须排除 RAW_DATA，不能把 PCM 帧交给 native DSD 接口。
         val candidates = collectOutputCandidates(device, streamingFormats)
-            .filter { !requireRawData || it.isRawData }
+            .filter { it.isRawData == requireRawData }
 
         if (candidates.isEmpty()) {
             recordOutputSelection(
