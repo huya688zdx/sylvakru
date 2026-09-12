@@ -267,6 +267,11 @@ Java_com_afalphy_sylvakru_UsbFlacNative_prepareSharedPlayback(
         reinterpret_cast<RegisterStream>(dlsym(mpv, "mpv_stream_cb_add_ro"));
     if (register_stream == nullptr) return JNI_FALSE;
     const int result = register_stream(reinterpret_cast<void*>(player_handle), flac_protocol, nullptr, openSharedFlac);
+    __android_log_print(ANDROID_LOG_INFO, "SylvakruFlac",
+        "Shared FLAC protocol registration result=%d player=%p "
+        "probeSourceSampleRate=%u probeSourceValidBits=%u probeSourceChannels=%u",
+        result, reinterpret_cast<void*>(player_handle), probe.streamInfo().sample_rate,
+        probe.streamInfo().valid_bits_per_sample, probe.streamInfo().channels);
     // 固定协议重复注册时 mpv 返回 INVALID_PARAMETER，既有回调仍然有效。
     return result == 0 || result == -4 ? JNI_TRUE : JNI_FALSE;
 }

@@ -1257,6 +1257,10 @@ String buildUsbDiagnosticsReport(
     }
   }
 
+  buffer.writeln();
+  buffer.writeln('## Recent player errors (Dart)');
+  _writeLogLines(buffer, logger.tailContaining('player error:', max: 50));
+
   return buffer.toString();
 }
 

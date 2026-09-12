@@ -880,6 +880,7 @@ void main() {
       expect(report, contains('replayGainMilliDb=0'));
       expect(report, contains('open ok'));
       expect(report, contains('native line'));
+      expect(report, contains('## Recent player errors (Dart)'));
       expect(report, contains('evidence=STREAMINFO sampleRate=96000 validBits=24'));
       expect(report, contains('format=s32le containerBits=32 validBits=24'));
       expect(report, contains('pcmContainerBits=24'));
