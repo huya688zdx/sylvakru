@@ -142,9 +142,11 @@ class _PortraitLyricsPageState extends State<PortraitLyricsPage> {
   }
 
   Widget content() {
-    return ValueListenableBuilder(
-      valueListenable: currentSongNotifier,
-      builder: (context, currentSong, child) {
+    return ListenableBuilder(
+      // 切歌后异步取色完成时，也要刷新背景与封面底色。
+      listenable: Listenable.merge([currentSongNotifier, updateLyricsNotifier]),
+      builder: (context, child) {
+        final currentSong = currentSongNotifier.value;
         return AnnotatedRegion(
           value: lyricsPageForegroundColor.value.computeLuminance() > 0.5
               ? SystemUiOverlayStyle.light

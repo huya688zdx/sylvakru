@@ -73,9 +73,11 @@ class _LandscapeLyricsPageState extends State<LandscapeLyricsPage> {
   }
 
   Widget content(double pageWidth, double pageHight) {
-    return ValueListenableBuilder(
-      valueListenable: currentSongNotifier,
-      builder: (context, currentSong, child) {
+    return ListenableBuilder(
+      // 切歌后异步取色完成时，也要刷新背景与封面底色。
+      listenable: Listenable.merge([currentSongNotifier, updateLyricsNotifier]),
+      builder: (context, child) {
+        final currentSong = currentSongNotifier.value;
         final coverArtSize = min(
           pageWidth * (isMobile ? 0.32 : 0.28),
           pageHight * (isMobile ? 0.6 : 0.55),
