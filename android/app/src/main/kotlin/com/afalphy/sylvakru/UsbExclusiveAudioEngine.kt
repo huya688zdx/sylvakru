@@ -2120,10 +2120,18 @@ class UsbExclusiveAudioEngine(
             isNewConnection = newConnection,
             readable = IbassoHidVolumeProtocol.capabilities.readable && !ibassoReaderWriteOnly,
         )
-        val readBaseRaw = if (shouldReadInitialVolume) {
+        var readBaseRaw = if (shouldReadInitialVolume) {
             readIbassoCurrentBaseRaw(controlConnection)
         } else {
             null
+        }
+        // 首次回读失败也要等待现有 reader 重启预算，不能先关连接取消恢复。
+        if (shouldReadInitialVolume && readBaseRaw == null &&
+            awaitIbassoReaderForVolumeVerification(isDsd, requestSessionGeneration) ==
+            IbassoReaderRecoveryAction.VERIFY_NOW
+        ) {
+            UsbDiagnostics.i(tag, "Retrying initial iBasso volume read after reader recovery.")
+            readBaseRaw = readIbassoCurrentBaseRaw(controlConnection)
         }
         if (
             newConnection &&
@@ -2533,26 +2541,22 @@ class UsbExclusiveAudioEngine(
         target: UsbVolumeTarget,
     ): String? {
         val errors = mutableListOf<String>()
+        val retryPackets = mutableListOf<ByteArray>()
         for (packet in ibassoVolumePackets(target)) {
             val command = packet[0].toInt() and 0xff
-            var response = transferIbassoPacket(
+            val response = transferIbassoPacket(
                 connection,
                 packet,
                 command,
                 failReaderOnTimeout = command != 1 && command != 2,
             )
-            // Macaron 连续调节时前两个写包偶尔丢 ACK，但 reader 仍正常。
-            // 同一寄存器、同一目标只重发一次，仍须收齐整组确认并最终回读。
+            // Macaron 前两个写包可能暂时丢 ACK，而后续寄存器仍能正常响应。
+            // 先完成其它写入再补发，避免立即重复同一包；每包仍只重试一次。
             if (response == null && (command == 1 || command == 2) &&
                 ibassoReaderRunning.get() && !ibassoReaderWriteOnly
             ) {
-                UsbDiagnostics.i(tag, "Retrying iBasso volume command $command after a missing ACK.")
-                response = transferIbassoPacket(
-                    connection,
-                    packet,
-                    command,
-                    failReaderOnTimeout = false,
-                )
+                retryPackets += packet
+                continue
             }
             val responseCommand = response?.getOrNull(6)?.toInt()?.and(0xff)
             val error = when {
@@ -2567,6 +2571,15 @@ class UsbExclusiveAudioEngine(
             } else {
                 SystemClock.sleep(10)
             }
+        }
+        for (packet in retryPackets) {
+            val command = packet[0].toInt() and 0xff
+            UsbDiagnostics.i(tag, "Retrying iBasso volume command $command after the remaining writes.")
+            val response = transferIbassoPacket(connection, packet, command, failReaderOnTimeout = false)
+            if (response?.getOrNull(6)?.toInt()?.and(0xff) != command || ibassoReaderWriteOnly) {
+                errors += "iBasso volume command $command retry failed."
+            }
+            SystemClock.sleep(10)
         }
         return errors.takeIf { it.isNotEmpty() }?.joinToString(" ")
     }
