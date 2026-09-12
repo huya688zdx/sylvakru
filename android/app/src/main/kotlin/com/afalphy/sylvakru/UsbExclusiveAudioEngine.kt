@@ -2535,12 +2535,25 @@ class UsbExclusiveAudioEngine(
         val errors = mutableListOf<String>()
         for (packet in ibassoVolumePackets(target)) {
             val command = packet[0].toInt() and 0xff
-            val response = transferIbassoPacket(
+            var response = transferIbassoPacket(
                 connection,
                 packet,
                 command,
                 failReaderOnTimeout = command != 1 && command != 2,
             )
+            // Macaron 连续调节时前两个写包偶尔丢 ACK，但 reader 仍正常。
+            // 同一寄存器、同一目标只重发一次，仍须收齐整组确认并最终回读。
+            if (response == null && (command == 1 || command == 2) &&
+                ibassoReaderRunning.get() && !ibassoReaderWriteOnly
+            ) {
+                UsbDiagnostics.i(tag, "Retrying iBasso volume command $command after a missing ACK.")
+                response = transferIbassoPacket(
+                    connection,
+                    packet,
+                    command,
+                    failReaderOnTimeout = false,
+                )
+            }
             val responseCommand = response?.getOrNull(6)?.toInt()?.and(0xff)
             val error = when {
                 response == null -> "iBasso volume command $command failed."
