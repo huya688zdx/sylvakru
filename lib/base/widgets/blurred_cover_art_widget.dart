@@ -55,6 +55,7 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
         if (picture == null || width <= 0 || height <= 0) {
+          _pendingKey = null;
           return Container(color: widget.color);
         }
 
@@ -70,7 +71,10 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
             '|${canvasWidth}x$canvasHeight'
             '|${sigmaX.toStringAsFixed(1)}|${sigmaY.toStringAsFixed(1)}'
             '|${widget.color.toARGB32()}';
-        if (key != _renderedKey && key != _pendingKey) {
+        if (key == _renderedKey) {
+          // 切回已显示的封面时，丢弃中途切歌留下的异步结果。
+          _pendingKey = null;
+        } else if (key != _pendingKey) {
           _pendingKey = key;
           final color = widget.color;
           // 微任务里再取图，避免在 build 期间同步 setState
