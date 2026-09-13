@@ -281,6 +281,9 @@ class _SongListState extends State<SongList> {
   bool _isLoadingMoreData = false;
   bool _reachEnd = false;
   void _onScroll() async {
+    if (sourceType == .feiniu && searchValue.isEmpty) {
+      return;
+    }
     if (prepareing | _isLoadingMoreData | _reachEnd) {
       return;
     }
@@ -398,7 +401,7 @@ class _SongListState extends State<SongList> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (isStreamSource) {
         if (songList.isEmpty) {
-          if (isLibrary) {
+          if (isLibrary && sourceType != .feiniu) {
             final songs = await streamClient?.getSongs(100, 0) ?? [];
 
             if (!mounted) {

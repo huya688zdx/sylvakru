@@ -58,6 +58,7 @@ void main() {
       },
     );
     final requestedPages = <int>[];
+    var expectedPageSize = 2;
     var loginCount = 0;
     var meCount = 0;
     server.listen((request) async {
@@ -93,7 +94,7 @@ void main() {
           final page = int.parse(request.uri.queryParameters['page']!);
           final size = int.parse(request.uri.queryParameters['size']!);
           requestedPages.add(page);
-          expect(size, 2);
+          expect(size, expectedPageSize);
           await _reply(request, {
             'code': 0,
             'data': {
@@ -157,6 +158,21 @@ void main() {
     expect(client.headers['Cookie'], 'music-token=token-1');
     expect(loginCount, 1);
     expect(meCount, 1);
+
+    // 全量曲库必须跨过单页 500 首限制，不能停在页面首批歌曲。
+    rows.addAll(
+      List.generate(
+        496,
+        (index) => {...rows.first, 'guid': 'song-${index + 5}'},
+      ),
+    );
+    expectedPageSize = 500;
+    requestedPages.clear();
+    final allSongs = await client.getAllSongs();
+    expect(requestedPages, [1, 2]);
+    expect(allSongs?.length, 501);
+    expect(allSongs?.map((song) => song.id).toSet().length, 501);
+    expect(allSongs?.last.id, 'song-500');
   });
 
   test('飞牛认证失效仅重登一次且续传 JSON 错误不污染已有缓存', () async {

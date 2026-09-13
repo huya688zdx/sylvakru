@@ -219,6 +219,11 @@ class FeiniuClient extends StreamClient {
     return rows == null ? null : _songs(rows);
   }
 
+  Future<List<MyAudioMetadata>?> getAllSongs() async {
+    final rows = await _list('/track/list', query: {'sort': 'title,asc'});
+    return rows == null ? null : _songs(rows);
+  }
+
   @override
   Future<List<MyAudioMetadata>?> searchSongs(
     String query,
