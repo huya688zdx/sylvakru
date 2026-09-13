@@ -327,7 +327,7 @@ class Library {
           cancelToken: cancelToken,
           resumeFrom: resumeFrom,
         ),
-        .navidrome || .emby => await client!.downloadSong(
+        .navidrome || .emby || .feiniu => await client!.downloadSong(
           song.id,
           partPath,
           cancelToken: cancelToken,

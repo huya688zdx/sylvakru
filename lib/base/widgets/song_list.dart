@@ -142,7 +142,8 @@ class _SongListState extends State<SongList> {
   bool prepareing = true;
 
   bool get reorderable {
-    return !albumStructureActive &&
+    return !(sourceType == .feiniu && playlist != null) &&
+        !albumStructureActive &&
         searchValue.isEmpty &&
         sortTypeNotifier.value == 0 &&
         (playlist != null ||
@@ -263,7 +264,7 @@ class _SongListState extends State<SongList> {
     searchTimer = Timer(Duration(milliseconds: 300), () async {
       if (searchValue.isNotEmpty) {
         tmpSongList.clear();
-        if (isLibrary && sourceType == .navidrome) {
+        if (isLibrary && (sourceType == .navidrome || sourceType == .feiniu)) {
           tmpSongList = await _fetchSongList(0) ?? [];
           if (!mounted) {
             return;

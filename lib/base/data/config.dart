@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/services/emby_client.dart';
+import 'package:sylvakru/base/services/feiniu_client.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/navidrome_client.dart';
 import 'package:sylvakru/base/services/stream_client.dart';
@@ -24,6 +25,10 @@ class Config {
   String? embyBaseUrl;
   String? embyUsername;
   String? embyPassword;
+
+  String? feiniuBaseUrl;
+  String? feiniuUsername;
+  String? feiniuPassword;
 
   static const _secureStorage = FlutterSecureStorage(
     mOptions: MacOsOptions(usesDataProtectionKeychain: false),
@@ -116,6 +121,16 @@ class Config {
       embyPassword ??= '';
     }
 
+    final feiniuMap = map['feiniu'] as Map<String, dynamic>?;
+    if (feiniuMap != null) {
+      feiniuBaseUrl = feiniuMap['baseUrl'];
+      feiniuUsername = feiniuMap['username'];
+
+      feiniuPassword = await _trySecureRead('feiniu_password');
+      feiniuPassword ??= feiniuMap['password'];
+      feiniuPassword ??= '';
+    }
+
     final tmpSourceType = map['sourceType'] as String?;
     if (tmpSourceType != null) {
       sourceType = SourceType.values.firstWhere(
@@ -129,10 +144,15 @@ class Config {
         sourceType = .navidrome;
       } else if (embyMap != null) {
         sourceType = .emby;
+      } else if (feiniuMap != null) {
+        sourceType = .feiniu;
       }
     }
 
-    isStreamSource = sourceType == .navidrome || sourceType == .emby;
+    isStreamSource =
+        sourceType == .navidrome ||
+        sourceType == .emby ||
+        sourceType == .feiniu;
     isNotStreamSource = !isStreamSource;
 
     if (sourceType == .navidrome && navidromeMap != null) {
@@ -146,6 +166,12 @@ class Config {
         baseUrl: embyBaseUrl!,
         username: embyUsername!,
         password: embyPassword!,
+      );
+    } else if (sourceType == .feiniu && feiniuMap != null) {
+      streamClient = FeiniuClient(
+        baseUrl: feiniuBaseUrl!,
+        username: feiniuUsername!,
+        password: feiniuPassword!,
       );
     }
 
@@ -168,6 +194,7 @@ class Config {
     bool webdavSecured = true;
     bool navidromeSecured = true;
     bool embySecured = true;
+    bool feiniuSecured = true;
 
     if (webdavClient != null) {
       webdavSecured = await _trySecureWrite(
@@ -185,6 +212,10 @@ class Config {
 
     if (embyPassword != null) {
       embySecured = await _trySecureWrite('emby_password', embyPassword!);
+    }
+
+    if (feiniuPassword != null) {
+      feiniuSecured = await _trySecureWrite('feiniu_password', feiniuPassword!);
     }
 
     await file.writeAsString(
@@ -211,6 +242,13 @@ class Config {
             'username': embyUsername,
             if (!embySecured) 'password': embyPassword,
           },
+
+        if (feiniuBaseUrl != null)
+          'feiniu': {
+            'baseUrl': feiniuBaseUrl,
+            'username': feiniuUsername,
+            if (!feiniuSecured) 'password': feiniuPassword,
+          },
       }),
     );
   }
@@ -235,7 +273,7 @@ class Config {
   }
 
   bool _hasPlainTextPassword(Map<String, dynamic> map) {
-    for (var key in ['webdav', 'navidrome', 'emby']) {
+    for (var key in ['webdav', 'navidrome', 'emby', 'feiniu']) {
       if (map[key] != null && map[key]['password'] != null) {
         return true;
       }

@@ -12,6 +12,7 @@ import 'package:sylvakru/base/services/picture_service.dart';
 import 'package:sylvakru/base/services/play_queue_logic.dart';
 import 'package:sylvakru/base/services/super_lyric.dart';
 import 'package:sylvakru/base/services/stream_client.dart';
+import 'package:sylvakru/base/services/feiniu_client.dart';
 import 'package:sylvakru/base/services/taskbar_service.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
@@ -663,6 +664,14 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       case .emby:
         resource = streamClient?.getStreamUrl(currentSong.id);
         break;
+      case .feiniu:
+        final client = streamClient;
+        if (client is! FeiniuClient || !await client.ping()) {
+          throw StateError('Feiniu music authentication failed');
+        }
+        if (generation != _loadGeneration) return;
+        resource = client.getStreamUrl(currentSong.id);
+        break;
       default:
         break;
     }
@@ -676,7 +685,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     await _player.open(
       Media(
         resource,
-        httpHeaders: needHeader ? webdavClient?.headers : null,
+        httpHeaders: sourceType == .feiniu
+            ? streamClient?.headers
+            : needHeader
+            ? webdavClient?.headers
+            : null,
         start: start,
       ),
       play: false,
@@ -771,7 +784,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         legacy.copySync(target.path);
       }
     }
-    if (isNotStreamSource) {
+    if (isNotStreamSource || sourceType == .feiniu) {
       _playQueueState = File(
         "${appSupportDir.path}/${sourceType.name}/play_queue_state.json",
       );
@@ -828,10 +841,30 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   Future<void> _loadPlayQueueState() async {
-    if (isNotStreamSource) {
+    if (isNotStreamSource || sourceType == .feiniu) {
       final content = await _playQueueState!.readAsString();
 
       final json = jsonDecode(content) as Map<String, dynamic>;
+
+      if (sourceType == .feiniu) {
+        // 飞牛未提供队列重排接口，沿用本地队列文件保留顺序和重复歌曲。
+        playQueue.clear();
+        _playQueueTmp.clear();
+        final client = streamClient;
+        if (client is! FeiniuClient ||
+            json['server'] != client.baseUrl ||
+            json['username'] != client.username ||
+            !await client.ping()) {
+          return;
+        }
+        final ids = <String>{
+          ...List<String>.from(json['playQueueTmp'] as List? ?? []),
+          ...List<String>.from(json['playQueue'] as List? ?? []),
+        };
+        for (final id in ids) {
+          if (!library.id2Song.containsKey(id)) await client.getSong(id);
+        }
+      }
 
       _playQueueTmp.addAll(_restoreQueue(json['playQueueTmp']));
       playQueue.addAll(_restoreQueue(json['playQueue']));
@@ -887,9 +920,13 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   Future<void> _savePlayQueueState() async {
-    if (isNotStreamSource) {
+    if (isNotStreamSource || sourceType == .feiniu) {
       _playQueueState!.writeAsStringSync(
         jsonEncode({
+          if (sourceType == .feiniu) ...{
+            'server': streamClient?.baseUrl,
+            'username': streamClient?.username,
+          },
           'playQueueTmp': _playQueueTmp.map((e) => e.id).toList(),
           'playQueue': playQueue.map((e) => e.id).toList(),
         }),

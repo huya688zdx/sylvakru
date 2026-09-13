@@ -241,7 +241,7 @@ class Artist extends ArtistAlbumBase {
   Future<void> load() async {
     if (completer == null) {
       completer = Completer<void>();
-      if (sourceType == .navidrome) {
+      if (sourceType == .navidrome || sourceType == .feiniu) {
         final albums = await streamClient?.getArtistAlbumList(id!);
         if (albums == null) {
           completer!.complete();
