@@ -402,6 +402,7 @@ class UsbExclusiveAudioEngine(
     @Volatile private var hardwareVolumeProtocol: String? = null
     @Volatile private var hardwareVolumeRaw: Int? = null
     @Volatile private var hardwareVolumeGainQ16: Int? = null
+    @Volatile private var retainedHardwareVolumeGainQ16: Int? = null
     @Volatile private var standardHardwareVolumeReadbackVerified = false
     @Volatile private var hardwareVolumeSyncPending = false
     @Volatile private var hardwareVolumeFrozen = false
@@ -1284,6 +1285,7 @@ class UsbExclusiveAudioEngine(
                 hardwareVolumeProtocol = null
                 hardwareVolumeRaw = null
                 hardwareVolumeGainQ16 = null
+                retainedHardwareVolumeGainQ16 = null
                 standardHardwareVolumeReadbackVerified = false
                 volumeControlEnabled = volumeMode != "raw"
                 pcmVolumeGainQ16 = if (volumeControlEnabled) {
@@ -1439,6 +1441,20 @@ class UsbExclusiveAudioEngine(
                 return
             }
             val wasHardwareActive = hardwareVolumeActive
+            val wantsHardware = volumeMode == "auto" || volumeMode == "dac"
+            val verifiedHardwareGainQ16 = hardwareVolumeGainQ16?.takeIf {
+                wasHardwareActive &&
+                    hardwareVolumeReadbackVerifiedState &&
+                    !hardwareVolumeWriteOnlyState
+            }
+            val trustedHardwareGainQ16 = if (!wantsHardware && !isDsd) {
+                verifiedHardwareGainQ16 ?: retainedHardwareVolumeGainQ16
+            } else {
+                null
+            }
+            if (wantsHardware || isDsd) {
+                retainedHardwareVolumeGainQ16 = null
+            }
             if (!hardwareVolumeFrozen) {
                 hardwareVolumeActive = false
                 hardwareVolumeProtocol = null
@@ -1446,13 +1462,15 @@ class UsbExclusiveAudioEngine(
                 hardwareVolumeGainQ16 = null
                 standardHardwareVolumeReadbackVerified = false
             }
-            val wantsHardware = volumeMode == "auto" || volumeMode == "dac"
             val vendorProtocol = quirk.hardwareVolumeProtocol
             val protocolSelection = usbVolumeProtocolSelection(vendorProtocol)
             val effectiveGainQ16 = effectiveVolumeGainQ16(
                 requestedVolumeGainQ16,
                 requestedReplayGainMilliDb,
             )
+            val pcmFallbackGainQ16 = trustedHardwareGainQ16?.let {
+                frozenPcmCompensationGainQ16(it, effectiveGainQ16)
+            } ?: effectiveGainQ16
             val effectiveHardwareGainQ16 = effectiveHardwareVolumeGainQ16(
                 requestedVolumeGainQ16,
                 requestedReplayGainMilliDb,
@@ -1612,7 +1630,7 @@ class UsbExclusiveAudioEngine(
                 }
             } else if (wasHardwareActive && !hardwareVolumeFrozen) {
                 if (!isDsd && volumeMode != "raw") {
-                    applyPcmDigitalFallbackImmediately(isDsd, effectiveGainQ16)
+                    applyPcmDigitalFallbackImmediately(isDsd, pcmFallbackGainQ16)
                 }
                 hardwareVolumeActive = false
                 hardwareVolumeProtocol = null
@@ -1632,6 +1650,11 @@ class UsbExclusiveAudioEngine(
                 fallbackReason = fallbackReason
                     ?: "Hardware volume readback is unavailable; using safe PCM fallback."
             }
+            if (!hardwareVolumeFrozen && !wantsHardware && !isDsd) {
+                // 数字/原始 PCM 切换不写 DAC 寄存器，旧回读增益才可继续作为补偿分母。
+                retainedHardwareVolumeGainQ16 =
+                    verifiedHardwareGainQ16 ?: retainedHardwareVolumeGainQ16
+            }
             volumeControlEnabled = if (hardwareVolumeFrozen) {
                 !isDsd && pcmVolumeGainQ16 < UNITY_GAIN_Q16
             } else {
@@ -1644,7 +1667,7 @@ class UsbExclusiveAudioEngine(
                 )
             }
             if (!hardwareVolumeFrozen) {
-                val targetPcmGain = if (volumeControlEnabled) effectiveGainQ16 else UNITY_GAIN_Q16
+                val targetPcmGain = if (volumeControlEnabled) pcmFallbackGainQ16 else UNITY_GAIN_Q16
                 setPcmVolumeGain(
                     targetPcmGain,
                     forceSmoothPcmHandoff ||
@@ -3412,6 +3435,7 @@ class UsbExclusiveAudioEngine(
             hardwareVolumeProtocol = null
             hardwareVolumeRaw = null
             hardwareVolumeGainQ16 = null
+            retainedHardwareVolumeGainQ16 = null
             standardHardwareVolumeReadbackVerified = false
             hardwareVolumeSyncPending = false
             hardwareVolumeFrozen = false
