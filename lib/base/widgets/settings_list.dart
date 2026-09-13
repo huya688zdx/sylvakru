@@ -310,10 +310,7 @@ class _SettingsListState extends State<SettingsList> {
                             image: getSourceTypeImage(tmp),
                             width: 30,
                             height: 30,
-                            color:
-                                tmp == .local ||
-                                    tmp == .webdav ||
-                                    tmp == .feiniu
+                            color: tmp == .local || tmp == .webdav
                                 ? iconColor.value
                                 : null,
                           ),
@@ -482,12 +479,7 @@ class _SettingsListState extends State<SettingsList> {
 
   Widget feiniuListTile(BuildContext context, AppLocalizations l10n) {
     return ListTile(
-      leading: Image(
-        image: serverImage,
-        width: 30,
-        height: 30,
-        color: iconColor.value,
-      ),
+      leading: Image(image: feiniuImage, width: 30, height: 30),
       title: Text(getSourceTypeDisplayName(l10n, .feiniu)),
       onTap: () {
         if (Loader.busy && sourceType == .feiniu) {

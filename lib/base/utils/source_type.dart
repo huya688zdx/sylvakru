@@ -29,6 +29,6 @@ AssetImage getSourceTypeImage(SourceType sourceType) {
     case .emby:
       return embyImage;
     case .feiniu:
-      return serverImage;
+      return feiniuImage;
   }
 }

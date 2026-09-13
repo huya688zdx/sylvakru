@@ -233,10 +233,7 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
                               ),
                               _buildSourceCard(thisSourceType: .navidrome),
                               _buildSourceCard(thisSourceType: .emby),
-                              _buildSourceCard(
-                                thisSourceType: .feiniu,
-                                color: iconColor.value,
-                              ),
+                              _buildSourceCard(thisSourceType: .feiniu),
                             ]),
                             gridDelegate:
                                 const SliverGridDelegateWithFixedCrossAxisCount(
@@ -274,7 +271,6 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
                                 Expanded(
                                   child: _buildSourceCard(
                                     thisSourceType: .feiniu,
-                                    color: iconColor.value,
                                   ),
                                 ),
                               ],
