@@ -182,16 +182,29 @@ class FeiniuClient extends StreamClient {
     }
   }
 
-  List<MyAudioMetadata> _songs(List<Map<String, dynamic>> rows) =>
-      rows.map((song) {
-        _rememberCover(song);
-        final album = song['album'];
-        if (album is Map<String, dynamic>) _rememberCover(album);
-        for (final artist in normalize(song['artists']) ?? []) {
-          _rememberCover(artist);
-        }
-        return MyAudioMetadata.fromMap(song, .feiniu);
-      }).toList();
+  List<MyAudioMetadata> _songs(
+    List<Map<String, dynamic>> rows, {
+    bool cache = true,
+  }) => rows.map((song) {
+    _rememberCover(song);
+    final album = song['album'];
+    if (album is Map<String, dynamic>) {
+      _rememberCover(album);
+      final songGuid = song['guid'] as String?;
+      final songCoverId = song['coverId'] as String?;
+      final albumCoverId = album['coverId'] as String?;
+      if (songGuid != null &&
+          _coverIds[songGuid]?.isNotEmpty != true &&
+          (songCoverId == null || songCoverId.isEmpty) &&
+          albumCoverId?.isNotEmpty == true) {
+        _coverIds[songGuid] = albumCoverId!;
+      }
+    }
+    for (final artist in normalize(song['artists']) ?? []) {
+      _rememberCover(artist);
+    }
+    return MyAudioMetadata.fromMap(song, .feiniu, cache: cache);
+  }).toList();
 
   Album _album(Map<String, dynamic> item) {
     _rememberCover(item);
@@ -221,7 +234,7 @@ class FeiniuClient extends StreamClient {
 
   Future<List<MyAudioMetadata>?> getAllSongs() async {
     final rows = await _list('/track/list', query: {'sort': 'title,asc'});
-    return rows == null ? null : _songs(rows);
+    return rows == null ? null : _songs(rows, cache: false);
   }
 
   @override
@@ -457,12 +470,18 @@ class FeiniuClient extends StreamClient {
           (lyric['content'] as String).trim().isEmpty,
     );
     if (lyrics.isEmpty) return '';
+    int sourcePriority(dynamic source) => switch (source) {
+      1 => 0,
+      2 => 1,
+      4 => 2,
+      _ => 3,
+    };
     lyrics.sort((a, b) {
       if (a['guid'] == data['preferred']) return -1;
       if (b['guid'] == data['preferred']) return 1;
-      final source = (a['source'] as num? ?? 99).compareTo(
-        b['source'] as num? ?? 99,
-      );
+      final source = sourcePriority(
+        a['source'],
+      ).compareTo(sourcePriority(b['source']));
       if (source != 0) return source;
       return (b['updatedAt'] as num? ?? b['createdAt'] as num? ?? 0).compareTo(
         a['updatedAt'] as num? ?? a['createdAt'] as num? ?? 0,

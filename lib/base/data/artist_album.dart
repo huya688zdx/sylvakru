@@ -252,7 +252,13 @@ class Artist extends ArtistAlbumBase {
 
         for (final album in albumList) {
           await album.load();
-          songList.addAll(album.songList);
+          if (sourceType == .navidrome) {
+            songList.addAll(album.songList);
+          }
+          changeNotifier.value++;
+        }
+        if (sourceType == .feiniu) {
+          songList.addAll(await streamClient?.getArtistSongs(id!) ?? []);
           changeNotifier.value++;
         }
         completer!.complete();

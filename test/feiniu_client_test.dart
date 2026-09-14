@@ -7,6 +7,7 @@ import 'package:sylvakru/base/data/library.dart' deferred as library_data;
 import 'package:sylvakru/base/services/feiniu_client.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/lyric.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 
 Future<void> _reply(
   HttpRequest request,
@@ -34,7 +35,10 @@ void main() {
     await library_data.loadLibrary();
   });
 
-  setUp(() => library_data.library.id2Song.clear());
+  setUp(() {
+    library_data.library.id2Song.clear();
+    library_data.library.songList.clear();
+  });
   tearDownAll(() => appSupportDirectory.delete(recursive: true));
 
   test('飞牛登录与曲库分页沿用真实协议并映射音频和歌词数据', () async {
@@ -54,13 +58,17 @@ void main() {
         'artists': [
           {'guid': 'artist-a', 'name': '测试艺术家'},
         ],
-        'album': {'guid': 'album-a', 'name': '测试专辑'},
+        'album': {'guid': 'album-a', 'name': '测试专辑', 'coverId': 'album-cover'},
       },
     );
     final requestedPages = <int>[];
+    final requestedCoverIds = <String>[];
+    rows[4]['coverId'] = 'song-cover';
     var expectedPageSize = 2;
     var loginCount = 0;
     var meCount = 0;
+    var preferLyrics = true;
+    int? failedPage;
     server.listen((request) async {
       if (request.uri.path == '/music/api/v1/user/password-login') {
         loginCount++;
@@ -95,6 +103,10 @@ void main() {
           final size = int.parse(request.uri.queryParameters['size']!);
           requestedPages.add(page);
           expect(size, expectedPageSize);
+          if (page == failedPage) {
+            await _reply(request, {'code': 10004});
+            return;
+          }
           await _reply(request, {
             'code': 0,
             'data': {
@@ -115,12 +127,18 @@ void main() {
             'code': 0,
             'data': {
               'list': [
-                {'guid': 'other', 'content': '其他歌词'},
-                {'guid': 'chosen', 'content': '[00:01.00]测试歌词'},
+                {'guid': 'source-3', 'source': 3, 'content': '[00:03.00]来源三'},
+                {'guid': 'source-4', 'source': 4, 'content': '[00:04.00]手工歌词'},
+                {'guid': 'chosen', 'source': 99, 'content': '[00:01.00]测试歌词'},
               ],
-              'preferred': 'chosen',
+              'preferred': preferLyrics ? 'chosen' : 'missing',
             },
           });
+        case '/music/api/v1/static/cover':
+          requestedCoverIds.add(request.uri.queryParameters['coverId']!);
+          request.response.headers.contentType = ContentType('image', 'png');
+          request.response.add([1, 2, 3]);
+          await request.response.close();
         default:
           await _reply(request, {'code': 404}, status: HttpStatus.notFound);
       }
@@ -152,6 +170,18 @@ void main() {
     );
     expect(parsedLyrics.lines.single.start, const Duration(seconds: 1));
     expect(parsedLyrics.lines.single.text, '测试歌词');
+    preferLyrics = false;
+    final defaultLyrics = ParsedLyrics();
+    applyLrcParsing(
+      defaultLyrics,
+      (await client.getLyricsById('song-3')).split('\n'),
+      noLyricsMessage: '',
+      parseFailedMessage: '',
+    );
+    expect(defaultLyrics.lines.single.start, const Duration(seconds: 4));
+    expect(defaultLyrics.lines.single.text, '手工歌词');
+    expect(await client.getPictureBytes('song-3'), [1, 2, 3]);
+    expect(requestedCoverIds, ['album-cover']);
     final streamUri = Uri.parse(client.getStreamUrl('song-3'));
     expect(streamUri.path, '/music/api/v1/track/stream');
     expect(streamUri.queryParameters, {'guid': 'song-3'});
@@ -173,6 +203,37 @@ void main() {
     expect(allSongs?.length, 501);
     expect(allSongs?.map((song) => song.id).toSet().length, 501);
     expect(allSongs?.last.id, 'song-500');
+    rows[4].remove('coverId');
+    await client.getAllSongs();
+    expect(await client.getPictureBytes('song-4'), [1, 2, 3]);
+    expect(requestedCoverIds, ['album-cover', 'song-cover']);
+
+    streamClient = client;
+    await library_data.library.load();
+    final oldSong = library_data.library.id2Song['song-0']!;
+    rows[0] = {
+      ...rows[0],
+      'title': '同步后的标题',
+      'audioSpec': {
+        ...rows[0]['audioSpec'] as Map<String, dynamic>,
+        'sampleRate': 96000,
+      },
+    };
+    await library_data.library.sync();
+    final refreshed = library_data.library.id2Song['song-0']!;
+    expect(refreshed.title, '同步后的标题');
+    expect(refreshed.samplerate, 96000);
+    expect(identical(refreshed, oldSong), isFalse);
+    expect(identical(library_data.library.songList.first, refreshed), isTrue);
+
+    final songsBeforeFailure = List.of(library_data.library.songList);
+    final mapBeforeFailure = Map.of(library_data.library.id2Song);
+    failedPage = 2;
+    rows[0] = {...rows[0], 'title': '不应发布的标题'};
+    await library_data.library.sync();
+    expect(library_data.library.songList, orderedEquals(songsBeforeFailure));
+    expect(library_data.library.id2Song, mapBeforeFailure);
+    expect(library_data.library.id2Song['song-0']?.title, '同步后的标题');
   });
 
   test('飞牛认证失效仅重登一次且续传 JSON 错误不污染已有缓存', () async {

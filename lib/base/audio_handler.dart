@@ -666,10 +666,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         break;
       case .feiniu:
         final client = streamClient;
-        if (client is! FeiniuClient || !await client.ping()) {
+        final authenticated = client is FeiniuClient && await client.ping();
+        if (generation != _loadGeneration) return;
+        if (!authenticated) {
           throw StateError('Feiniu music authentication failed');
         }
-        if (generation != _loadGeneration) return;
         resource = client.getStreamUrl(currentSong.id);
         break;
       default:
@@ -1163,6 +1164,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       _handleReplayGainMetadataChanged,
     );
     ++_loadGeneration;
+    isLoading = false;
     if (_usbExclusiveActive) {
       await _stopExclusiveIntentionally();
       _usbExclusiveActive = false;
@@ -1355,7 +1357,6 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         replaceActive: replacingUsbExclusive,
       );
       if (generation != _loadGeneration) {
-        isLoading = false;
         return;
       }
       if (openedExclusive) {
@@ -1375,18 +1376,20 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         }
         await _applyUsbOutputForSong(currentSong);
         if (generation != _loadGeneration) {
-          isLoading = false;
           return;
         }
         await _openPlayerMedia(currentSong, start: start);
       }
 
+      if (generation != _loadGeneration) return;
       if (isPlayingNotifier.value) {
         _playLastSyncTime = DateTime.now();
       }
     } catch (error) {
+      if (generation != _loadGeneration) return;
       if (replacingUsbExclusive && generation == _loadGeneration) {
         await _stopExclusiveIntentionally();
+        if (generation != _loadGeneration) return;
         _usbExclusiveActive = false;
         _usbExclusivePosition = Duration.zero;
       }
