@@ -71,12 +71,18 @@ class SuperLyric {
 
   Future<void> _invoke(String method, Object? arguments) async {
     try {
-      await _channel.invokeMethod<void>(method, arguments);
+      if (await _channel.invokeMethod<bool>(method, arguments) == true) {
+        return;
+      }
     } on PlatformException {
-      // 外部歌词插件调用失败，忽略即可。
+      // 通道暂时不可用，留给下一次播放位置更新重试。
     } on MissingPluginException {
-      // 没有对应插件实现，忽略。
+      // 原生通道尚未就绪，不能把当前行记为已发送。
     }
+    // 原生端返回 false 也表示未送出；同时清除两层去重和停止状态。
+    _lastPublishedIndex = null;
+    _lastSent = null;
+    _hasSentStop = false;
   }
 
   int _currentIndexAt(Duration position) {
