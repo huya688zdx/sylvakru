@@ -8,6 +8,7 @@ import 'package:sylvakru/base/services/picture_service.dart';
 // 预模糊结果缓存：重开页面或来回切歌时直接复用，避免重复解码和模糊
 final _blurredCoverCache = <String, ui.Image>{};
 final _blurredCoverCacheKeys = <String>[];
+final _blurredCoverPending = <String, Future<void>>{};
 const _blurredCoverCacheLimit = 12;
 
 /// vivid 背景专用的预模糊封面。
@@ -110,32 +111,54 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
     double sigmaY,
   ) async {
     try {
+      if (!mounted || key != _pendingKey) {
+        return;
+      }
       var cached = _blurredCoverCache[key];
-      if (cached == null) {
+      while (cached == null) {
         await loadPictureSafe(picture);
+        // 页面已切走时，不再为旧背景启动解码和模糊。
+        if (!mounted || key != _pendingKey) {
+          return;
+        }
         if (!picture.isExist) {
           _setImage(null, key);
           return;
         }
-        cached = await _renderBlurred(
-          picture.path,
-          color,
-          canvasWidth,
-          canvasHeight,
-          sigmaX,
-          sigmaY,
-        );
-        _blurredCoverCache[key] = cached;
-        _blurredCoverCacheKeys.add(key);
-        if (_blurredCoverCacheKeys.length > _blurredCoverCacheLimit) {
-          _blurredCoverCache
-              .remove(_blurredCoverCacheKeys.removeAt(0))
-              ?.dispose();
+        // 加载期间其他页面可能已经生成了同一背景。
+        cached = _blurredCoverCache[key];
+        if (cached != null) {
+          break;
         }
-      } else {
-        _blurredCoverCacheKeys.remove(key);
-        _blurredCoverCacheKeys.add(key);
+        await _blurredCoverPending.putIfAbsent(key, () async {
+          try {
+            final image = await _renderBlurred(
+              picture.path,
+              color,
+              canvasWidth,
+              canvasHeight,
+              sigmaX,
+              sigmaY,
+            );
+            _blurredCoverCache[key] = image;
+            _blurredCoverCacheKeys.add(key);
+            if (_blurredCoverCacheKeys.length > _blurredCoverCacheLimit) {
+              _blurredCoverCache
+                  .remove(_blurredCoverCacheKeys.removeAt(0))
+                  ?.dispose();
+            }
+          } finally {
+            _blurredCoverPending.remove(key);
+          }
+        });
+        if (!mounted || key != _pendingKey) {
+          return;
+        }
+        // 重新读取缓存，避免等待期间结果被淘汰后使用已释放的图像。
+        cached = _blurredCoverCache[key];
       }
+      _blurredCoverCacheKeys.remove(key);
+      _blurredCoverCacheKeys.add(key);
       _setImage(cached.clone(), key);
     } catch (_) {
       _setImage(null, key);
