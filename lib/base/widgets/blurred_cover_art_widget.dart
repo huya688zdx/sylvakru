@@ -4,20 +4,18 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/widgets/cover_art_widget.dart';
 
 // 预模糊结果缓存：重开页面或来回切歌时直接复用，避免重复解码和模糊
-final _blurredCoverCache = <String, ui.Image>{};
-final _blurredCoverCacheKeys = <String>[];
-final _blurredCoverPending = <String, Future<void>>{};
+final _blurredCoverCache = <(MyPicture, int, String), ui.Image>{};
+final _blurredCoverCacheKeys = <(MyPicture, int, String)>[];
+final _blurredCoverPending = <(MyPicture, int, String), Future<void>>{};
 const _blurredCoverCacheLimit = 12;
 
 /// vivid 背景专用的预模糊封面。
 ///
-/// 原实现是全屏 CoverArtWidget 叠 BackdropFilter，Impeller 下只要产出新帧
-/// （进度条 tick、歌词滚动、跑马灯等）就要整屏重算一次高斯模糊，是播放页
-/// 掉帧的大头。这里改为换歌时把封面按屏幕裁剪缩成小图、一次性模糊后缓存，
-/// 之后每帧只画一张小纹理。sigmaX/sigmaY 与原 BackdropFilter 的屏幕空间
-/// sigma 含义一致，内部按画布缩放比例换算，视觉效果与原来基本等价。
+/// 将封面按背景尺寸裁剪、缩小并模糊后缓存，减少背景重复绘制时的模糊计算。
+/// sigmaX/sigmaY 使用逻辑像素，生成小图时按画布比例换算。
 class BlurredCoverArtWidget extends StatefulWidget {
   final MyPicture? picture;
   final Color color;
@@ -39,11 +37,33 @@ class BlurredCoverArtWidget extends StatefulWidget {
 class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
   // 展示用的克隆句柄，生命周期独立于缓存，缓存淘汰不影响正在显示的图
   ui.Image? _image;
-  String? _renderedKey;
-  String? _pendingKey;
+  (MyPicture, int, String)? _renderedKey;
+  (MyPicture, int, String)? _pendingKey;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.picture?.changeNotifier.addListener(_pictureChanged);
+  }
+
+  @override
+  void didUpdateWidget(BlurredCoverArtWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.picture != widget.picture) {
+      oldWidget.picture?.changeNotifier.removeListener(_pictureChanged);
+      widget.picture?.changeNotifier.addListener(_pictureChanged);
+    }
+  }
+
+  void _pictureChanged() {
+    setState(() {
+      _pendingKey = null;
+    });
+  }
 
   @override
   void dispose() {
+    widget.picture?.changeNotifier.removeListener(_pictureChanged);
     _image?.dispose();
     super.dispose();
   }
@@ -57,52 +77,67 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
         final height = constraints.maxHeight;
         if (picture == null || width <= 0 || height <= 0) {
           _pendingKey = null;
-          return Container(color: widget.color);
-        }
+        } else {
+          // 限制生成图片的短边尺寸，sigma 按同比例换算。
+          final scale = min(1.0, 270 / min(width, height));
+          final canvasWidth = max(1, (width * scale).round());
+          final canvasHeight = max(1, (height * scale).round());
+          final sigmaX = widget.sigmaX * scale;
+          final sigmaY = widget.sigmaY * scale;
 
-        // 重模糊后没有高频细节，画布短边压到 270 足够，sigma 按同比例换算
-        final scale = min(1.0, 270 / min(width, height));
-        final canvasWidth = max(1, (width * scale).round());
-        final canvasHeight = max(1, (height * scale).round());
-        final sigmaX = widget.sigmaX * scale;
-        final sigmaY = widget.sigmaY * scale;
-
-        final key =
-            '${picture.path}|${picture.changeNotifier.value}'
-            '|${canvasWidth}x$canvasHeight'
-            '|${sigmaX.toStringAsFixed(1)}|${sigmaY.toStringAsFixed(1)}'
-            '|${widget.color.toARGB32()}';
-        if (key == _renderedKey) {
-          // 切回已显示的封面时，丢弃中途切歌留下的异步结果。
-          _pendingKey = null;
-        } else if (key != _pendingKey) {
-          _pendingKey = key;
-          final color = widget.color;
-          // 微任务里再取图，避免在 build 期间同步 setState
-          Future.microtask(
-            () => _prepare(
-              key,
-              picture,
-              color,
-              canvasWidth,
-              canvasHeight,
-              sigmaX,
-              sigmaY,
-            ),
+          final key = (
+            picture,
+            picture.changeNotifier.value,
+            '${picture.path}|${canvasWidth}x$canvasHeight'
+                '|${sigmaX.toStringAsFixed(1)}|${sigmaY.toStringAsFixed(1)}'
+                '|${widget.color.toARGB32()}',
           );
-        }
+          if (key == _renderedKey) {
+            // 切回已显示的封面时，丢弃中途切歌留下的异步结果。
+            _pendingKey = null;
+          } else if (key != _pendingKey) {
+            _pendingKey = key;
+            final color = widget.color;
+            // 微任务里再取图，避免在 build 期间同步 setState
+            Future.microtask(
+              () => _prepare(
+                key,
+                picture,
+                color,
+                canvasWidth,
+                canvasHeight,
+                sigmaX,
+                sigmaY,
+              ),
+            );
+          }
 
-        if (_image == null) {
-          return Container(color: widget.color);
+          // 换歌时保留旧图直到新图就绪，对齐原 Image 的 gaplessPlayback 行为。
+          if (_image != null) {
+            return RawImage(image: _image, fit: BoxFit.fill);
+          }
         }
-        // 换歌时保留旧图直到新图就绪，对齐原 Image 的 gaplessPlayback 行为
-        return RawImage(image: _image, fit: BoxFit.fill);
+        return ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CoverArtWidget(picture: picture, color: widget.color),
+              BackdropFilter(
+                filter: ui.ImageFilter.blur(
+                  sigmaX: widget.sigmaX,
+                  sigmaY: widget.sigmaY,
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ],
+          ),
+        );
       },
     );
   }
 
   Future<void> _prepare(
-    String key,
+    (MyPicture, int, String) key,
     MyPicture picture,
     Color color,
     int canvasWidth,
@@ -165,7 +200,7 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
     }
   }
 
-  void _setImage(ui.Image? image, String key) {
+  void _setImage(ui.Image? image, (MyPicture, int, String) key) {
     if (!mounted || key != _pendingKey) {
       image?.dispose();
       return;
@@ -188,71 +223,71 @@ class _BlurredCoverArtWidgetState extends State<BlurredCoverArtWidget> {
   ) async {
     final bytes = await File(path).readAsBytes();
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-    final descriptor = await ui.ImageDescriptor.encoded(buffer);
+    ui.ImageDescriptor? descriptor;
+    ui.Codec? codec;
+    ui.Image? cover;
+    ui.Picture? recordedPicture;
     try {
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
       // 只解码到画布所需分辨率，避免整幅解码大图
       final decodeScale = max(
         canvasWidth / descriptor.width,
         canvasHeight / descriptor.height,
       );
-      final codec = await descriptor.instantiateCodec(
+      codec = await descriptor.instantiateCodec(
         targetWidth: max(1, (descriptor.width * decodeScale).ceil()),
         targetHeight: max(1, (descriptor.height * decodeScale).ceil()),
       );
       final frame = await codec.getNextFrame();
-      codec.dispose();
-      final cover = frame.image;
-      try {
-        final rect = Rect.fromLTWH(
-          0,
-          0,
-          canvasWidth.toDouble(),
-          canvasHeight.toDouble(),
-        );
-        final recorder = ui.PictureRecorder();
-        final canvas = Canvas(recorder, rect);
-        // 底色与原 CoverArtWidget 的 Material 底色一致
-        canvas.drawRect(rect, Paint()..color = color);
-        canvas.saveLayer(
-          rect,
-          Paint()
-            ..imageFilter = ui.ImageFilter.blur(
-              sigmaX: sigmaX,
-              sigmaY: sigmaY,
-              tileMode: TileMode.clamp,
-            ),
-        );
-        // 与原全屏 BoxFit.cover 相同的居中裁剪
-        final coverWidth = cover.width.toDouble();
-        final coverHeight = cover.height.toDouble();
-        final srcScale = min(
-          coverWidth / canvasWidth,
-          coverHeight / canvasHeight,
-        );
-        final srcWidth = canvasWidth * srcScale;
-        final srcHeight = canvasHeight * srcScale;
-        final src = Rect.fromLTWH(
-          (coverWidth - srcWidth) / 2,
-          (coverHeight - srcHeight) / 2,
-          srcWidth,
-          srcHeight,
-        );
-        canvas.drawImageRect(
-          cover,
-          src,
-          rect,
-          Paint()..filterQuality = FilterQuality.medium,
-        );
-        canvas.restore();
-        final picture = recorder.endRecording();
-        final image = await picture.toImage(canvasWidth, canvasHeight);
-        picture.dispose();
-        return image;
-      } finally {
-        cover.dispose();
-      }
+      cover = frame.image;
+      final rect = Rect.fromLTWH(
+        0,
+        0,
+        canvasWidth.toDouble(),
+        canvasHeight.toDouble(),
+      );
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder, rect);
+      // 底色与原 CoverArtWidget 的 Material 底色一致
+      canvas.drawRect(rect, Paint()..color = color);
+      canvas.saveLayer(
+        rect,
+        Paint()
+          ..imageFilter = ui.ImageFilter.blur(
+            sigmaX: sigmaX,
+            sigmaY: sigmaY,
+            tileMode: TileMode.clamp,
+          ),
+      );
+      // 与原全屏 BoxFit.cover 相同的居中裁剪
+      final coverWidth = cover.width.toDouble();
+      final coverHeight = cover.height.toDouble();
+      final srcScale = min(
+        coverWidth / canvasWidth,
+        coverHeight / canvasHeight,
+      );
+      final srcWidth = canvasWidth * srcScale;
+      final srcHeight = canvasHeight * srcScale;
+      final src = Rect.fromLTWH(
+        (coverWidth - srcWidth) / 2,
+        (coverHeight - srcHeight) / 2,
+        srcWidth,
+        srcHeight,
+      );
+      canvas.drawImageRect(
+        cover,
+        src,
+        rect,
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      canvas.restore();
+      recordedPicture = recorder.endRecording();
+      return await recordedPicture.toImage(canvasWidth, canvasHeight);
     } finally {
-      descriptor.dispose();
+      recordedPicture?.dispose();
+      cover?.dispose();
+      codec?.dispose();
+      descriptor?.dispose();
       buffer.dispose();
     }
   }
