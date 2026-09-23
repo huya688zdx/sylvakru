@@ -13,12 +13,12 @@ import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/utils/media_query.dart';
 import 'package:sylvakru/base/widgets/my_divider.dart';
+import 'package:sylvakru/base/widgets/my_scaffold.dart';
 import 'package:sylvakru/base/widgets/my_sheet.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 import 'package:sylvakru/landscape_view/title_bar.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/layer/settings_layer.dart';
-import 'package:sylvakru/portrait_view/custom_appbar_leading.dart';
 import 'package:sylvakru/portrait_view/my_search_field.dart';
 
 part '../portrait_view/pages/font_picker_page.dart';
@@ -87,43 +87,44 @@ class _FontPickerLayerState extends State<FontPickerLayer> {
       type: .custom,
       allowedExtensions: ['ttf', 'otf', 'ttc'],
     );
-    if (fileResult != null) {
-      if (context.mounted) {
-        final result = await getInputTextDialog(context, l10n.setFontName);
-        if (result == '') {
-          return;
-        }
-        if (Platform.isMacOS || Platform.isWindows) {
-          for (final font in JustFontScan.scan().map((e) => e.name).toList()) {
-            if (font == result) {
-              if (context.mounted) {
-                showCenterMessage('Conflict name with system font');
-              }
-              return;
+    if (fileResult.isEmpty) {
+      return;
+    }
+    if (context.mounted) {
+      final result = await getInputTextDialog(context, l10n.setFontName);
+      if (result == '') {
+        return;
+      }
+      if (Platform.isMacOS || Platform.isWindows) {
+        for (final font in JustFontScan.scan().map((e) => e.name).toList()) {
+          if (font == result) {
+            if (context.mounted) {
+              showCenterMessage('Conflict name with system font');
             }
+            return;
           }
         }
-        final loader = FontLoader(result);
+      }
+      final loader = FontLoader(result);
 
-        for (final file in fileResult.files) {
-          final bytes = await File(file.path!).readAsBytes();
-          loader.addFont(Future.value(ByteData.view(bytes.buffer)));
-        }
+      for (final file in fileResult) {
+        final bytes = await File(file.path!).readAsBytes();
+        loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+      }
 
-        await loader.load();
+      await loader.load();
 
-        await fontManager.addFonts(
-          result,
-          fileResult.files.map((e) => e.path!).toList(),
-        );
+      await fontManager.addFonts(
+        result,
+        fileResult.map((e) => e.path!).toList(),
+      );
 
-        if (importedFonts.contains(result)) {
-          setState(() {});
-        } else {
-          importedFonts.add(result);
-          allFonts.clear();
-          reloadAllFonts();
-        }
+      if (importedFonts.contains(result)) {
+        setState(() {});
+      } else {
+        importedFonts.add(result);
+        allFonts.clear();
+        reloadAllFonts();
       }
     }
   }

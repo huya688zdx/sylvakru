@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:sylvakru/base/data/loader.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
@@ -184,15 +185,36 @@ class Sidebar extends StatelessWidget {
                       ),
                     ),
 
+                    ValueListenableBuilder(
+                      valueListenable: Loader.stateNotifier,
+                      builder: (context, value, child) {
+                        if (isNotStreamSource) {
+                          return SliverToBoxAdapter(
+                            child: sidebarItem(
+                              label: 'folders',
+
+                              leading: ImageIcon(folderImage, size: 30),
+                              content: l10n.folders,
+
+                              onTap: () {
+                                layersManager.switchRootLayer('folders');
+                              },
+                            ),
+                          );
+                        }
+                        return SliverToBoxAdapter(child: SizedBox());
+                      },
+                    ),
+
                     SliverToBoxAdapter(
                       child: sidebarItem(
-                        label: 'folders',
+                        label: 'home',
 
-                        leading: ImageIcon(folderImage, size: 30),
-                        content: l10n.folders,
+                        leading: ImageIcon(homeImage, size: 30),
+                        content: l10n.home,
 
                         onTap: () {
-                          layersManager.switchRootLayer('folders');
+                          layersManager.switchRootLayer('home');
                         },
                       ),
                     ),
@@ -224,13 +246,13 @@ class Sidebar extends StatelessWidget {
 
                     SliverToBoxAdapter(
                       child: sidebarItem(
-                        label: 'ranking',
+                        label: 'frequently',
 
-                        leading: ImageIcon(rankingImage, size: 30),
-                        content: l10n.ranking,
+                        leading: ImageIcon(frequentlyImage, size: 30),
+                        content: l10n.frequently,
 
                         onTap: () {
-                          layersManager.switchRootLayer('ranking');
+                          layersManager.switchRootLayer('frequently');
                         },
                       ),
                     ),
@@ -445,16 +467,15 @@ class Sidebar extends StatelessWidget {
             leading: ValueListenableBuilder(
               valueListenable: playlist.changeNotifier,
               builder: (context, value, child) {
-                final coverSong = playlist.getCoverSong();
                 return ListenableBuilder(
                   listenable: Listenable.merge([
-                    coverSong?.picture.changeNotifier,
+                    playlist.picture?.changeNotifier,
                   ]),
                   builder: (_, _) {
                     return CoverArtWidget(
                       size: 30,
                       borderRadius: 3,
-                      picture: coverSong?.picture,
+                      picture: playlist.picture,
                     );
                   },
                 );

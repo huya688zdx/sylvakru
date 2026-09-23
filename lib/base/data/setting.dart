@@ -68,7 +68,7 @@ class Setting {
         json['playlistsUseLargePicture'] as bool? ??
         playlistsUseLargePictureNotifier.value;
 
-    endDrawerNotifier.value = json['endDrawer'] as bool? ?? Platform.isIOS;
+    endDrawerNotifier.value = json['endDrawer'] as bool? ?? false;
 
     playlistManager.useAlbumStructureNotifier.value =
         json['playlistsUseAlbumStructure'] as bool? ??

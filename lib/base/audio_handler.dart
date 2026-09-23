@@ -19,6 +19,7 @@ import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/lyric.dart';
+import 'package:sylvakru/base/utils/dynamic_lyrics_page_route.dart';
 import 'package:sylvakru/base/utils/path.dart';
 import 'package:sylvakru/base/widgets/equalizer.dart';
 import 'package:sylvakru/base/widgets/lyric_list_view.dart';
@@ -26,13 +27,12 @@ import 'package:sylvakru/base/data/history.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
 import 'package:sylvakru/base/utils/contrast_color_generator.dart';
 import 'package:sylvakru/base/data/library.dart';
-import 'package:sylvakru/base/data/database.dart';
-import 'package:sylvakru/base/extensions/metadata_extension.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
 import 'package:sylvakru/base/services/replay_gain.dart';
 import 'package:sylvakru/base/services/usb_audio_preferences.dart';
 import 'package:sylvakru/base/services/usb_audio_service.dart';
 import 'package:sylvakru/base/utils/metadata_utils.dart';
+import 'package:sylvakru/layer/lyrics_page_layer.dart';
 import 'dart:async';
 
 import 'package:sylvakru/portrait_view/sleep_timer.dart';
@@ -42,8 +42,6 @@ late AudioSession _session;
 late MyAudioHandler audioHandler;
 
 List<MyAudioMetadata> playQueue = [];
-String? playQueueForStreamId;
-const String playQueueForStreamName = '_sylvakru_play_queue_';
 
 final ValueNotifier<MyAudioMetadata?> currentSongNotifier = ValueNotifier(null);
 final isPlayingNotifier = ValueNotifier(false);
@@ -615,7 +613,9 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       snapshot['error'] = error.toString();
     }
     if (generation != _loadGeneration ||
-        _usbExclusiveActive || isLoading || _sharedPlaybackOpenFailed) {
+        _usbExclusiveActive ||
+        isLoading ||
+        _sharedPlaybackOpenFailed) {
       return {
         'error': 'Playback changed during capture; export again.',
         if (_sharedPlaybackOpenFailed) 'playerError': _sharedPlaybackError,
@@ -662,6 +662,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         break;
       case .navidrome:
       case .emby:
+        await streamClient?.ping();
+        if (generation != _loadGeneration) return;
         resource = streamClient?.getStreamUrl(currentSong.id);
         break;
       case .feiniu:
@@ -686,7 +688,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     await _player.open(
       Media(
         resource,
-        httpHeaders: sourceType == .feiniu
+        httpHeaders: isStreamSource
             ? streamClient?.headers
             : needHeader
             ? webdavClient?.headers
@@ -785,14 +787,12 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         legacy.copySync(target.path);
       }
     }
-    if (isNotStreamSource || sourceType == .feiniu) {
-      _playQueueState = File(
-        "${appSupportDir.path}/${sourceType.name}/play_queue_state.json",
-      );
-      if (!(_playQueueState!.existsSync())) {
-        _playQueueState!.createSync(recursive: true);
-        _savePlayQueueState();
-      }
+    _playQueueState = File(
+      "${appSupportDir.path}/${sourceType.name}/play_queue_state.json",
+    );
+    if (!(_playQueueState!.existsSync())) {
+      _playQueueState!.createSync(recursive: true);
+      _savePlayQueueState();
     }
 
     _playState = File(
@@ -842,114 +842,63 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   Future<void> _loadPlayQueueState() async {
-    if (isNotStreamSource || sourceType == .feiniu) {
-      final content = await _playQueueState!.readAsString();
+    final content = await _playQueueState!.readAsString();
 
-      final json = jsonDecode(content) as Map<String, dynamic>;
+    final json = jsonDecode(content) as Map<String, dynamic>;
 
-      if (sourceType == .feiniu) {
-        // 飞牛未提供队列重排接口，沿用本地队列文件保留顺序和重复歌曲。
-        playQueue.clear();
-        _playQueueTmp.clear();
-        final client = streamClient;
-        if (client is! FeiniuClient ||
-            json['server'] != client.baseUrl ||
-            json['username'] != client.username ||
-            !await client.ping()) {
-          return;
-        }
-        final ids = <String>{
-          ...List<String>.from(json['playQueueTmp'] as List? ?? []),
-          ...List<String>.from(json['playQueue'] as List? ?? []),
-        };
-        for (final id in ids) {
-          if (!library.id2Song.containsKey(id)) await client.getSong(id);
-        }
-      }
+    if (sourceType == .feiniu &&
+        (json['server'] != streamClient?.baseUrl ||
+            json['username'] != streamClient?.username)) {
+      return;
+    }
+    _playQueueTmp.addAll(_restoreQueue(json['playQueueTmp']));
+    playQueue.addAll(_restoreQueue(json['playQueue']));
 
-      _playQueueTmp.addAll(_restoreQueue(json['playQueueTmp']));
-      playQueue.addAll(_restoreQueue(json['playQueue']));
-    } else {
-      playQueue.clear();
-      playQueueForStreamId = null;
-      playQueue = await streamClient?.getPlayQueue() ?? [];
-      // 首次升级时，把旧曲库中的队列迁到作者新版的云端队列。
-      final legacyQueue = File(
-        '${appSupportDir.path}/${sourceType.name}/play_queue_state.json',
-      );
-      final legacyDB = File(
-        '${appSupportDir.path}/${sourceType.name}/metadata.db',
-      );
-      if (playQueueForStreamId == null &&
-          legacyQueue.existsSync() &&
-          legacyDB.existsSync()) {
-        final saved = await readJsonMapFile(legacyQueue);
-        final ids = List<String>.from(saved['playQueue'] as List? ?? []);
-        if (ids.isNotEmpty) {
-          final db = MetadataDB(
-            openMetadataDB('${sourceType.name}/metadata.db'),
-          );
-          try {
-            final rows = await (db.select(
-              db.metadataItems,
-            )..where((row) => row.id.isIn(ids))).get();
-            for (final row in rows) {
-              library.id2Song.putIfAbsent(row.id, row.toMetadata);
-            }
-            playQueue = _restoreQueue(ids);
-          } finally {
-            await db.close();
-          }
-          if (playQueue.isNotEmpty && streamClient != null) {
-            playQueueForStreamId = await streamClient!.createPlaylist(
-              playQueueForStreamName,
-            );
-            if (playQueueForStreamId != null &&
-                await streamClient!.updatePlaylistSongs(
-                  playQueueForStreamId!,
-                  playQueue.map((song) => song.id).toList(),
-                )) {
-              await legacyQueue.writeAsString('{}');
-            }
-          }
+    // 首次升级时将旧远端队列保存到本地，保留远端歌单作为备份。
+    if ((sourceType == .navidrome || sourceType == .emby) &&
+        !File(getSyncedFilePath(sourceType)).existsSync()) {
+      final playlists = await streamClient?.getPlaylists();
+      for (final playlist in playlists ?? []) {
+        if (playlist.name != '_sylvakru_play_queue_' || playlist.id == null) {
+          continue;
         }
-      }
-      if (playModeNotifier.value == 1) {
-        _playQueueTmp = List.from(playQueue);
+        final songs = await streamClient?.getPlaylistSongs(playlist.id!);
+        if (songs == null) break;
+        playQueue
+          ..clear()
+          ..addAll(_restoreQueue(songs.map((song) => song.id).toList()));
+        _playQueueTmp
+          ..clear()
+          ..addAll(playQueue);
+        await _savePlayQueueState();
+        break;
       }
     }
   }
 
   Future<void> _savePlayQueueState() async {
-    if (isNotStreamSource || sourceType == .feiniu) {
-      _playQueueState!.writeAsStringSync(
-        jsonEncode({
-          if (sourceType == .feiniu) ...{
-            'server': streamClient?.baseUrl,
-            'username': streamClient?.username,
-          },
-          'playQueueTmp': _playQueueTmp.map((e) => e.id).toList(),
-          'playQueue': playQueue.map((e) => e.id).toList(),
-        }),
-      );
-    } else {
-      await streamClient?.savePlayQueue(playQueue.map((e) => e.id).toList());
-    }
+    _playQueueState!.writeAsStringSync(
+      jsonEncode({
+        if (sourceType == .feiniu) ...{
+          'server': streamClient?.baseUrl,
+          'username': streamClient?.username,
+        },
+        'playQueueTmp': _playQueueTmp.map((e) => e.id).toList(),
+        'playQueue': playQueue.map((e) => e.id).toList(),
+      }),
+    );
   }
 
   Future<void> _tryPlay() async {
-    if (!_started) {
-      _started = true;
-      if (autoPlayOnStartupNotifier.value) {
-        if (playQueue.isEmpty) {
-          currentIndex = 0;
-          playQueue = List.from(library.songList);
-        }
-        if (playQueue.isNotEmpty) {
-          isPlayingNotifier.value = true;
-        } else {
-          currentIndex = -1;
-        }
+    if (!_started && autoPlayOnStartupNotifier.value) {
+      if (playQueue.isEmpty) {
+        currentIndex = 0;
+        playQueue = List.from(library.songList);
+      }
+      if (playQueue.isNotEmpty) {
+        isPlayingNotifier.value = true;
+      } else {
+        currentIndex = -1;
       }
     }
 
@@ -965,6 +914,21 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
 
       if (isPlayingNotifier.value) {
         _startPositionTimer();
+      }
+    }
+
+    if (!_started) {
+      _started = true;
+      if (autoPlayOnStartupNotifier.value) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (currentSongNotifier.value != null) {
+            globalNavigatorKey.currentState?.push(
+              DynamicLyricsPageRoute(
+                pageBuilder: (_, _, _) => LyricsPageLayer(),
+              ),
+            );
+          }
+        });
       }
     }
   }
@@ -1199,45 +1163,27 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   Future<void> sync() async {
-    if (isNotStreamSource) {
-      playQueue = getNewQueue(playQueue);
-      _playQueueTmp = getNewQueue(_playQueueTmp);
-      final currentSong = currentSongNotifier.value;
-      if (currentSong != null) {
-        final tmpCurrentSong = library.id2Song[currentSong.id];
-        if (tmpCurrentSong != null) {
-          await _setLyricsAndUpdateColors(tmpCurrentSong);
-          currentSongNotifier.value = tmpCurrentSong;
-          currentIndex = playQueue.indexOf(tmpCurrentSong);
-          updateServiceMediaItem(tmpCurrentSong);
-        } else {
-          currentSongNotifier.value = null;
-          currentIndex = -1;
-          if (playQueue.isNotEmpty) {
-            await skipToNext();
-          } else {
-            await stop();
-          }
-        }
-      }
-      saveAllStates();
-    } else {
-      await _loadPlayQueueState();
-      currentIndex = playQueue.indexWhere(
-        (e) => e.id == currentSongNotifier.value?.id,
-      );
-      if (currentIndex != -1) {
-        final tmpCurrentSong = playQueue[currentIndex];
+    playQueue = getNewQueue(playQueue);
+    _playQueueTmp = getNewQueue(_playQueueTmp);
+    final currentSong = currentSongNotifier.value;
+    if (currentSong != null) {
+      final tmpCurrentSong = library.id2Song[currentSong.id];
+      if (tmpCurrentSong != null) {
         await _setLyricsAndUpdateColors(tmpCurrentSong);
         currentSongNotifier.value = tmpCurrentSong;
+        currentIndex = playQueue.indexOf(tmpCurrentSong);
         updateServiceMediaItem(tmpCurrentSong);
-      } else if (playQueue.isNotEmpty) {
-        await skipToNext();
       } else {
         currentSongNotifier.value = null;
-        await stop();
+        currentIndex = -1;
+        if (playQueue.isNotEmpty) {
+          await skipToNext();
+        } else {
+          await stop();
+        }
       }
     }
+    saveAllStates();
   }
 
   Future<void> _setLyricsAndUpdateColors(
@@ -1949,6 +1895,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
 
   @override
   Future<void> stop() async {
+    isLoading = false;
     _cancelVolumeRamp();
     _cancelOutputGainRamp();
     if (_usbExclusiveActive) {

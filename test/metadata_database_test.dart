@@ -22,8 +22,8 @@ void main() {
     await appSupportDirectory.delete(recursive: true);
   });
 
-  test('本地版本 3 升级后保留歌曲与四项 ReplayGain', () async {
-    final file = File('${appSupportDirectory.path}/local_v3.db');
+  test('本地版本 4 升级后补齐封面并保留歌曲与四项 ReplayGain', () async {
+    final file = File('${appSupportDirectory.path}/local_v4.db');
     var database = MetadataDB(NativeDatabase(file));
     addTearDown(() => database.close());
     final metadata = MyAudioMetadata(
@@ -40,9 +40,9 @@ void main() {
 
     await database.into(database.metadataItems).insert(metadata.toCompanion());
     await database.customStatement(
-      "ALTER TABLE metadata_items ADD COLUMN source_type TEXT NOT NULL DEFAULT 'local'",
+      'ALTER TABLE metadata_items DROP COLUMN cover_id',
     );
-    await database.customStatement('PRAGMA user_version = 3');
+    await database.customStatement('PRAGMA user_version = 4');
     await database.close();
     database = MetadataDB(NativeDatabase(file));
     final restored = (await database.select(database.metadataItems).getSingle())
@@ -54,7 +54,7 @@ void main() {
         .get();
     expect(
       columns.map((row) => row.read<String>('name')),
-      isNot(contains('source_type')),
+      contains('cover_id'),
     );
     expect(restored.replayGainTrackGainDb, -7.25);
     expect(restored.replayGainTrackPeak, 0.987654321);
@@ -62,13 +62,14 @@ void main() {
     expect(restored.replayGainAlbumPeak, 1.012345678);
   });
 
-  test('作者版本 3 升级后补齐 ReplayGain 列并保留歌曲', () async {
-    final file = File('${appSupportDirectory.path}/upstream_v3.db');
+  test('作者版本 4 升级后补齐 ReplayGain 列并保留歌曲封面', () async {
+    final file = File('${appSupportDirectory.path}/upstream_v4.db');
     var database = MetadataDB(NativeDatabase(file));
     addTearDown(() => database.close());
     final metadata = MyAudioMetadata(
       AudioMetadata(title: 'ReplayGain null test'),
       id: 'replaygain-null',
+      coverId: 'saved-cover',
       path: 'replaygain-null',
     );
 
@@ -83,13 +84,14 @@ void main() {
         'ALTER TABLE metadata_items DROP COLUMN replay_gain_$name',
       );
     }
-    await database.customStatement('PRAGMA user_version = 3');
+    await database.customStatement('PRAGMA user_version = 4');
     await database.close();
     database = MetadataDB(NativeDatabase(file));
     final restored = (await database.select(database.metadataItems).getSingle())
         .toMetadata();
 
     expect(restored.title, 'ReplayGain null test');
+    expect(restored.coverId, 'saved-cover');
     expect(restored.replayGainTrackGainDb, isNull);
     expect(restored.replayGainTrackPeak, isNull);
     expect(restored.replayGainAlbumGainDb, isNull);

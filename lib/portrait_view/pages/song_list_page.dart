@@ -2,26 +2,10 @@ part of '../../base/widgets/song_list.dart';
 
 extension _SongListPage on _SongListState {
   Widget pageView(BuildContext context) {
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      backgroundColor: Colors.transparent,
-      resizeToAvoidBottomInset: false,
-      body: Column(
-        children: [
-          customAppBar(context),
-          Expanded(child: contentWithStack()),
-        ],
-      ),
-    );
-  }
-
-  PreferredSizeWidget customAppBar(BuildContext context) {
-    return AppBar(
-      automaticallyImplyLeading: false,
-      leading: customAppBarLeading(context, label: rootLabel),
-      backgroundColor: Colors.transparent,
-      scrolledUnderElevation: 0,
-      systemOverlayStyle: mainPageThemeNotifier.value == .dark ? .light : .dark,
+    return myScaffold(
+      context: context,
+      body: contentWithStack(),
+      label: rootLabel,
       actions: [
         ValueListenableBuilder(
           valueListenable: currentSongListNotifier,
@@ -113,7 +97,7 @@ extension _SongListPage on _SongListState {
                         songList: currentSongList,
                         playlist: playlist,
                         folder: folder,
-                        isRanking: isRanking,
+                        isFrequently: isFrequently,
                         isRecently: isRecently,
                         isLibrary: isLibrary,
                         reorderable: reorderable,
@@ -182,7 +166,7 @@ extension _SongListPage on _SongListState {
                 );
               },
             ),
-          if (!isRanking && !isRecently && !albumStructureActive)
+          if (!isFrequently && !isRecently && !albumStructureActive)
             ListTile(
               leading: ImageIcon(sequenceImage),
               title: Text(
@@ -602,7 +586,7 @@ extension _SongListPage on _SongListState {
           visualDensity: const VisualDensity(horizontal: 0, vertical: -4),
           onTap: () =>
               audioHandler.setPlayQueue(currentSongList, 0, targetIndex: index),
-          trailing: isRanking
+          trailing: isFrequently && sourceType != .emby
               ? SizedBox(
                   width: 100,
                   child: Row(
@@ -620,203 +604,21 @@ extension _SongListPage on _SongListState {
     );
   }
 
-  Widget optionItem({
-    required String text,
-    required Icon leading,
-    required Function() onTap,
-  }) {
-    return ListTile(
-      leading: leading,
-      title: Text(text, style: TextStyle(fontWeight: FontWeight.bold)),
-      visualDensity: const VisualDensity(horizontal: 0, vertical: -4),
-      onTap: onTap,
-    );
-  }
-
   Widget songOptionsButton(int index, MyAudioMetadata song) {
-    final l10n = AppLocalizations.of(context);
-
     return IconButton(
-      icon: Icon(Icons.more_vert, size: 15),
+      icon: Icon(Icons.more_vert, size: 20),
       onPressed: () {
         tryVibrate();
-        showModalBottomSheet(
+        showSongOptions(
           context: context,
-          isScrollControlled: true,
-          useRootNavigator: true,
-          builder: (context) {
-            return MySheet(
-              Column(
-                children: [
-                  SizedBox(height: 5),
-
-                  ListTile(
-                    leading: CoverArtWidget(
-                      size: 50,
-                      borderRadius: 5,
-                      picture: song.picture,
-                    ),
-                    title: Text(
-                      getTitle(song),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      "${getArtist(song)} - ${getAlbum(song)}",
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-
-                  SizedBox(height: 5),
-                  MyDivider(color: dividerColor, thickness: 0.5, height: 1),
-                  SizedBox(height: 5),
-
-                  Expanded(
-                    child: ListView(
-                      physics: const ClampingScrollPhysics(),
-                      children: [
-                        if (reorderable)
-                          optionItem(
-                            text: l10n.move2Top,
-                            leading: Icon(Icons.vertical_align_top_rounded),
-                            onTap: () {
-                              Navigator.pop(context);
-                              moveToTop(index);
-                            },
-                          ),
-
-                        optionItem(
-                          text: l10n.playNow,
-                          leading: Icon(Icons.play_arrow_rounded),
-                          onTap: () {
-                            Navigator.pop(context);
-                            audioHandler.singlePlay(song);
-                            audioHandler.saveAllStates();
-                          },
-                        ),
-
-                        optionItem(
-                          text: l10n.playNext,
-                          leading: Icon(Icons.navigate_next_rounded),
-                          onTap: () {
-                            Navigator.pop(context);
-                            if (playQueue.isEmpty) {
-                              audioHandler.singlePlay(song);
-                            } else {
-                              audioHandler.insert2Next(song);
-                            }
-                            audioHandler.saveAllStates();
-                          },
-                        ),
-
-                        optionItem(
-                          text: l10n.add2Queue,
-                          leading: Icon(Icons.playlist_add_rounded),
-                          onTap: () {
-                            Navigator.pop(context);
-                            if (playQueue.isEmpty) {
-                              audioHandler.singlePlay(song);
-                            } else {
-                              audioHandler.add2Last(song);
-                            }
-                            audioHandler.saveAllStates();
-                          },
-                        ),
-
-                        optionItem(
-                          text: l10n.add2Playlist,
-                          leading: Icon(Icons.add_rounded),
-                          onTap: () {
-                            Navigator.pop(context);
-                            showAddPlaylistDialog(context, [song]);
-                          },
-                        ),
-
-                        if (artist == null)
-                          optionItem(
-                            text: l10n.go2Artist,
-                            leading: Icon(Icons.people),
-                            onTap: () {
-                              Navigator.pop(context);
-                              goToArtist(song, context);
-                            },
-                          )
-                        else if (isNotStreamSource &&
-                            artist!.name != song.artist)
-                          optionItem(
-                            text: l10n.go2Artist,
-                            leading: Icon(Icons.people),
-                            onTap: () {
-                              Navigator.pop(context);
-                              goToArtist(
-                                song,
-                                context,
-                                excludedArtist: artist!.name,
-                              );
-                            },
-                          ),
-
-                        if (album == null)
-                          optionItem(
-                            text: l10n.go2Album,
-                            leading: Icon(Icons.album_rounded),
-                            onTap: () {
-                              Navigator.pop(context);
-                              goToAlbum(song);
-                            },
-                          ),
-
-                        optionItem(
-                          text: l10n.songInfo,
-                          leading: Icon(Icons.info_outline_rounded),
-                          onTap: () {
-                            Navigator.pop(context);
-                            showAnimationDialog(
-                              context: context,
-                              child: SongInfo(song: song),
-                            );
-                          },
-                        ),
-
-                        if (sourceType == .local &&
-                            artist == null &&
-                            album == null)
-                          optionItem(
-                            text: l10n.editMetadata,
-                            leading: Icon(Icons.edit_rounded),
-                            onTap: () {
-                              Navigator.pop(context);
-                              showAnimationDialog(
-                                context: context,
-                                child: EditMetadata(song: song),
-                              );
-                            },
-                          ),
-
-                        if (playlist != null)
-                          optionItem(
-                            text: l10n.delete,
-                            leading: Icon(Icons.delete_rounded),
-                            onTap: () async {
-                              if (await showConfirmDialog(
-                                context,
-                                l10n.delete,
-                              )) {
-                                playlist!.remove([song]);
-                                if (context.mounted) {
-                                  Navigator.pop(context);
-                                }
-                              }
-                            },
-                          ),
-
-                        SizedBox(height: 50),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
+          song: song,
+          moveToTop: reorderable ? () => moveToTop(index) : null,
+          includeGoToArtist: artist == null || artist!.name != song.artist,
+          excludedArtist: artist?.name,
+          includeGoToAlbum: album == null,
+          includeEdit: sourceType == .local && artist == null && album == null,
+          playlist: playlist,
+          useDialog: false,
         );
       },
     );

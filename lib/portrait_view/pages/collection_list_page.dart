@@ -2,21 +2,8 @@ part of "../../base/widgets/collection_list.dart";
 
 extension _CollectionListPage on CollectionListState {
   Widget pageView(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        leading: customAppBarLeading(context),
-        backgroundColor: Colors.transparent,
-        systemOverlayStyle: mainPageThemeNotifier.value == .dark
-            ? .light
-            : .dark,
-        scrolledUnderElevation: 0,
-        title: Text(title),
-        centerTitle: true,
-        actions: [searchField(searchHint), moreButton(context)],
-      ),
+    return myScaffold(
+      context: context,
       body: ListenableBuilder(
         listenable: Listenable.merge([isListViewNotifier, changeNotifier]),
         builder: (context, child) {
@@ -30,6 +17,8 @@ extension _CollectionListPage on CollectionListState {
               : pageGridView();
         },
       ),
+      title: title,
+      actions: [searchField(searchHint), moreButton(context)],
     );
   }
 
@@ -182,8 +171,11 @@ extension _CollectionListPage on CollectionListState {
   Widget listView() {
     return ListView.builder(
       itemExtent: 64,
-      itemCount: currentPictureList.length,
+      itemCount: currentPictureList.length + 1,
       itemBuilder: (context, index) {
+        if (index >= currentPictureList.length) {
+          return SizedBox();
+        }
         final picture = currentPictureList[index];
         final text = currentTextList[index];
         return Center(
@@ -223,13 +215,16 @@ extension _CollectionListPage on CollectionListState {
         return GridView.builder(
           padding: EdgeInsets.symmetric(horizontal: 20),
           gridDelegate: MyGirdDelegate(
-            maxCrossAxisExtent: useLargePicture ? 180 : 120,
+            maxCrossAxisExtent: useLargePicture ? 240 : 120,
             crossAxisSpacing: 10,
             mainAxisSpacing: 5,
             textExtent: 25,
           ),
-          itemCount: currentPictureList.length,
+          itemCount: currentPictureList.length + (useLargePicture ? 2 : 3),
           itemBuilder: (context, index) {
+            if (index >= currentPictureList.length) {
+              return SizedBox();
+            }
             final picture = currentPictureList[index];
             final text = currentTextList[index];
 
@@ -255,7 +250,6 @@ extension _CollectionListPage on CollectionListState {
                       width: constraints.maxWidth - 10,
                       child: Text(
                         text,
-                        textAlign: .center,
                         style: TextStyle(overflow: TextOverflow.ellipsis),
                       ),
                     ),

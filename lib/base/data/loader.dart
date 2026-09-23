@@ -14,8 +14,10 @@ import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/data/setting.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/picture_load_scheduler.dart';
 import 'package:sylvakru/base/services/picture_service.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/utils/common_utils.dart';
 import 'package:sylvakru/base/utils/path.dart';
 import 'package:sylvakru/layer/layers_manager.dart';
@@ -55,17 +57,23 @@ class Loader {
     _busy = true;
     stateNotifier.value++;
 
+    if (isStreamSource && streamClient != null) {
+      if (!File(getSyncedFilePath(sourceType)).existsSync()) {
+        await firstSync();
+        return;
+      }
+    }
+
     await library.load();
 
     await audioHandler.loadStates();
 
-    history.load();
+    await history.load();
 
     await playlistManager.load();
 
-    if (isNotStreamSource) {
-      artistAlbumManager.classify();
-    }
+    artistAlbumManager.classify();
+
     _busy = false;
     stateNotifier.value++;
   }
@@ -77,12 +85,14 @@ class Loader {
     pictureLoadScheduler.clear();
     await audioHandler.justClear();
     await library.cancelDownloads();
+    await library.close();
 
     globalPictureList = [];
 
     library = Library();
-    artistAlbumManager = ArtistAlbumManager();
-    history = History();
+    artistAlbumManager.clear();
+    history.clear();
+    playlistManager.reset();
 
     await load();
   }
@@ -97,20 +107,32 @@ class Loader {
 
     globalPictureList = [];
 
-    artistAlbumManager = ArtistAlbumManager();
+    artistAlbumManager.clear();
 
-    history = History();
+    history.clear();
+
+    playlistManager.reset();
 
     await library.sync();
 
     await audioHandler.sync();
 
-    history.load();
+    await history.load();
 
-    await playlistManager.load();
+    await playlistManager.sync();
 
-    if (isNotStreamSource) {
-      artistAlbumManager.classify();
+    artistAlbumManager.classify();
+
+    if (isStreamSource) {
+      File syncedFile = File(getSyncedFilePath(sourceType));
+
+      if (streamClient != null && !syncedFile.existsSync()) {
+        syncedFile.createSync(recursive: true);
+      }
+
+      if (streamClient == null && syncedFile.existsSync()) {
+        syncedFile.deleteSync(recursive: true);
+      }
     }
 
     _busy = false;
@@ -121,22 +143,32 @@ class Loader {
     _busy = true;
     stateNotifier.value++;
 
+    logger.output('${sourceType.name} first sync');
+
     layersManager.switchRootLayer('songs');
 
-    artistAlbumManager = ArtistAlbumManager();
-
-    history = History();
+    playlistManager.reset();
 
     await library.sync();
 
     await audioHandler.loadStates();
 
-    history.load();
+    await history.load();
 
-    await playlistManager.load();
+    await playlistManager.sync();
 
-    if (isNotStreamSource) {
-      artistAlbumManager.classify();
+    artistAlbumManager.classify();
+
+    if (isStreamSource) {
+      File syncedFile = File(getSyncedFilePath(sourceType));
+
+      if (streamClient != null && !syncedFile.existsSync()) {
+        syncedFile.createSync(recursive: true);
+      }
+
+      if (streamClient == null && syncedFile.existsSync()) {
+        syncedFile.deleteSync(recursive: true);
+      }
     }
 
     _busy = false;
@@ -169,8 +201,6 @@ class Loader {
             playlistsFile.writeAsStringSync(jsonEncode(list.skip(1).toList()));
           }
         }
-
-        // 保留旧来源目录中的下载缓存及待迁移队列元数据。
       }
     }
     tmp.writeAsStringSync(jsonEncode(versionNumber));

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sylvakru/base/app.dart' as app;
 import 'package:sylvakru/base/data/library.dart' deferred as library_data;
@@ -21,6 +22,8 @@ Future<void> _reply(
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = null;
   late Directory appSupportDirectory;
 
   setUpAll(() async {
@@ -28,6 +31,11 @@ void main() {
       'sylvakru_feiniu_test',
     );
     app.appSupportDir = appSupportDirectory;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (call) async => appSupportDirectory.path,
+        );
     app.sourceType = app.SourceType.feiniu;
     app.isStreamSource = true;
     app.isNotStreamSource = false;
@@ -39,7 +47,15 @@ void main() {
     library_data.library.id2Song.clear();
     library_data.library.songList.clear();
   });
-  tearDownAll(() => appSupportDirectory.delete(recursive: true));
+  tearDownAll(() async {
+    await library_data.library.close();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          null,
+        );
+    await appSupportDirectory.delete(recursive: true);
+  });
 
   test('飞牛登录与曲库分页沿用真实协议并映射音频和歌词数据', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -157,10 +173,9 @@ void main() {
     expect(songs.first.bitrate, 1411);
     expect(songs.first.samplerate, 44100);
     expect(songs.first.format, 'flac');
-    expect(songs.first.artistId, 'artist-a');
-    expect(songs.first.albumId, 'album-a');
-    final searched = await client.searchSongs('测试', 2, 2);
-    expect(searched?.map((song) => song.id), ['song-2', 'song-3']);
+    expect(songs.first.artist, '测试艺术家');
+    expect(songs.first.album, '测试专辑');
+    expect(songs.first.coverId, 'album-cover');
     final parsedLyrics = ParsedLyrics();
     applyLrcParsing(
       parsedLyrics,
@@ -180,7 +195,7 @@ void main() {
     );
     expect(defaultLyrics.lines.single.start, const Duration(seconds: 4));
     expect(defaultLyrics.lines.single.text, '手工歌词');
-    expect(await client.getPictureBytes('song-3'), [1, 2, 3]);
+    expect(await client.getPictureBytes(songs.first.coverId!), [1, 2, 3]);
     expect(requestedCoverIds, ['album-cover']);
     final streamUri = Uri.parse(client.getStreamUrl('song-3'));
     expect(streamUri.path, '/music/api/v1/track/stream');
@@ -204,12 +219,16 @@ void main() {
     expect(allSongs?.map((song) => song.id).toSet().length, 501);
     expect(allSongs?.last.id, 'song-500');
     rows[4].remove('coverId');
-    await client.getAllSongs();
-    expect(await client.getPictureBytes('song-4'), [1, 2, 3]);
-    expect(requestedCoverIds, ['album-cover', 'song-cover']);
+    final refreshedSongs = await client.getAllSongs();
+    expect(await client.getPictureBytes(refreshedSongs![4].coverId!), [
+      1,
+      2,
+      3,
+    ]);
+    expect(requestedCoverIds, ['album-cover', 'album-cover']);
 
     streamClient = client;
-    await library_data.library.load();
+    await library_data.library.sync();
     final oldSong = library_data.library.id2Song['song-0']!;
     rows[0] = {
       ...rows[0],

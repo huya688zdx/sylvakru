@@ -1,6 +1,6 @@
 # Sylvakru USB 独占维护版
 
-基于作者 4.1.0 版本同步维护。Sylvakru 支持 Android、iOS、Windows、Linux 和 macOS，音乐来源包括本地、WebDAV、Navidrome 和 Emby。本分支的 USB 独占功能用于 Android 外接 USB DAC。
+基于作者 4.3.0 版本同步维护。Sylvakru 支持 Android、iOS、Windows、Linux 和 macOS，音乐来源包括本地、WebDAV、Navidrome、Emby 和飞牛音乐。本分支的 USB 独占功能用于 Android 外接 USB DAC。
 
 ## USB 独占播放功能介绍
 
@@ -11,6 +11,26 @@
 ## 致谢
 
 感谢原作者 [AfalpHy](https://github.com/AfalpHy) 创建并开源 sylvakru 项目，本分支的开发建立在原项目基础之上。
+
+Currently supports:
+- Local
+- WebDAV
+- Navidrome
+- Emby
+- Feiniu Music (Special thanks to [huya688zdx](https://github.com/huya688zdx) for the contribution)
+
+
+
+> Formerly known as Particle Music.
+
+> [!Note]
+> **The iOS version is now available on the Apple App Store!**
+
+## USB Exclusive Mode(Android)
+
+Special thanks to [huya688zdx](https://github.com/huya688zdx) for maintaining USB Exclusive Mode support.
+
+If you need USB Exclusive Mode, please check out this [fork](https://github.com/huya688zdx/sylvakru)
 
 
 > 说明：独占播放需要外接支持 UAC 的 USB DAC；未接 DAC 时自动走系统共享输出，功能与原版一致。

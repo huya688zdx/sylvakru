@@ -42,7 +42,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get folder => 'Folder';
 
   @override
-  String get ranking => 'Most Played';
+  String get frequently => 'Most Played';
 
   @override
   String get recently => 'Recently Played';
@@ -245,10 +245,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get editMetadata => 'Edit Metadata';
 
   @override
-  String get add2Playlist => 'Add to a Playlist';
+  String get add2Playlist => 'Add to Playlist';
 
   @override
-  String get added2Playlist => 'Added to a playlist';
+  String get added2Playlist => 'Added to playlist';
 
   @override
   String get selectAll => 'Select All';
@@ -1186,7 +1186,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get chooseMusicSource => 'Choose a Music Source';
 
   @override
-  String get feiniuMusic => 'FnOS Music';
+  String get feiniuMusic => 'Feiniu Music';
 
   @override
   String get feiniuConnectionFailed =>

@@ -9,6 +9,7 @@ part 'database.g.dart';
 
 class MetadataItems extends Table {
   TextColumn get id => text()();
+  TextColumn get coverId => text().nullable()();
 
   IntColumn get modified => integer().nullable()();
 
@@ -48,7 +49,7 @@ class MetadataDB extends _$MetadataDB {
   MetadataDB(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration {
@@ -61,12 +62,13 @@ class MetadataDB extends _$MetadataDB {
           await m.addColumn(metadataItems, metadataItems.albumArtist);
         }
 
-        if (from < 4) {
-          // 两个分支的版本 3 结构不同，按现有列迁移并保留音量标签。
+        if (from < 5) {
+          // 双方版本 3、4 的结构不同，按现有列补齐封面及增益字段。
           final columns = (await customSelect(
             'PRAGMA table_info(metadata_items)',
           ).get()).map((row) => row.read<String>('name')).toSet();
           for (final column in [
+            metadataItems.coverId,
             metadataItems.replayGainTrackGainDb,
             metadataItems.replayGainTrackPeak,
             metadataItems.replayGainAlbumGainDb,
