@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
@@ -16,7 +15,6 @@ import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/services/webdav_client.dart';
 import 'package:sylvakru/base/utils/source_type.dart';
 import 'package:sylvakru/base/widgets/custom_text_field.dart';
-import 'package:sylvakru/base/widgets/feiniu_login_widget.dart';
 import 'package:sylvakru/l10n/generated/app_localizations.dart';
 
 class ConnectClientWidget extends StatefulWidget {
@@ -109,8 +107,7 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
 
             SizedBox(height: isMobile ? 10 : 25),
 
-            if (widget.sourceType == .feiniu &&
-                (Platform.isAndroid || Platform.isIOS || Platform.isMacOS))
+            if (widget.sourceType == .feiniu)
               TextButton(
                 onPressed: _connecting ? null : () => onSave(nasLogin: true),
                 style: TextButton.styleFrom(foregroundColor: textColor.value),
@@ -231,6 +228,7 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
       config.feiniuUsername = null;
       config.feiniuPassword = null;
       config.feiniuToken = null;
+      await FeiniuClient.clearSavedNasLogin(baseUrlTmp.text);
       if (sourceType == widget.sourceType) {
         streamClient = null;
       }
@@ -250,22 +248,6 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
         await dir.delete(recursive: true);
       }
     }
-  }
-
-  Future<bool> loginWithNas(FeiniuClient client) async {
-    final random = Random.secure();
-    final state = List.generate(
-      16,
-      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
-    final loginUrl = await client.getNasLoginUrl(state: state);
-    if (!mounted || loginUrl == null) return false;
-    final code = await showDialog<String>(
-      context: context,
-      builder: (context) => FeiniuLoginWidget(loginUrl: loginUrl, state: state),
-    );
-    if (!mounted || code == null || code.isEmpty) return false;
-    return client.loginWithCode(code);
   }
 
   void onSave({bool nasLogin = false}) async {
@@ -323,19 +305,31 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
         config.embyUsername = usernameTmp.text;
         config.embyPassword = passwordTmp.text;
       } else if (widget.sourceType == .feiniu) {
+        if (nasLogin &&
+            (usernameTmp.text.trim().isEmpty || passwordTmp.text.isEmpty)) {
+          if (mounted) {
+            showCenterMessage(l10n.feiniuNasLoginFailed);
+          }
+          return;
+        }
         final feiniuClient = FeiniuClient(
           baseUrl: baseUrlTmp.text,
-          username: nasLogin ? '' : usernameTmp.text,
-          password: nasLogin ? '' : passwordTmp.text,
+          username: usernameTmp.text,
+          password: passwordTmp.text,
           token:
-              !nasLogin &&
-                  baseUrlTmp.text == config.feiniuBaseUrl &&
+              baseUrlTmp.text == config.feiniuBaseUrl &&
                   usernameTmp.text == config.feiniuUsername &&
                   passwordTmp.text == config.feiniuPassword
               ? config.feiniuToken
               : null,
         );
-        if (nasLogin && !await loginWithNas(feiniuClient)) {
+        // 已能复用有效 token 时跳过系统登录（过期后由免密续登自动接管）。
+        if (nasLogin &&
+            feiniuClient.token == null &&
+            !await feiniuClient.loginWithNasAccount(
+              account: usernameTmp.text.trim(),
+              password: passwordTmp.text,
+            )) {
           if (mounted) showCenterMessage(l10n.feiniuNasLoginFailed);
           return;
         }

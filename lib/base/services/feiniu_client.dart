@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
+import 'package:sylvakru/base/services/fn_native_login.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/stream_client.dart';
 
@@ -49,6 +50,19 @@ class FeiniuClient extends StreamClient {
     );
   }
 
+  /// fnOS 源头地址（去掉 /music/api/v1 后缀），系统 WS 与 OAuth 都在这里。
+  String get _origin {
+    final base = dio.options.baseUrl;
+    return base.endsWith('/music/api/v1')
+        ? base.substring(0, base.length - '/music/api/v1'.length)
+        : base;
+  }
+
+  /// 免密续登凭据的存储键（按 fnOS 服务器隔离）。
+  String get _savedLoginKey => Uri.parse(_origin).host.isEmpty
+      ? _origin
+      : Uri.parse(_origin).authority;
+
   @override
   Map<String, String> get headers => {
     if (_isRelay || _token != null)
@@ -58,34 +72,120 @@ class FeiniuClient extends StreamClient {
       ].join('; '),
   };
 
-  Future<Uri?> getNasLoginUrl({required String state}) async {
-    final response = await dio.get(
-      '/sys/config',
-      options: Options(headers: headers),
-    );
-    final body = response.data;
-    if (body is! Map || body['code'] != 0) return null;
-    final oauth = body['data']?['nasOAuth'];
-    if (oauth is! Map || oauth['clientId'] is! String) return null;
-    final url = oauth['url'] as String?;
-    final uri = Uri.parse(url?.isNotEmpty == true ? url! : dio.options.baseUrl);
-    if (uri.scheme != 'http' && uri.scheme != 'https') return null;
-    final redirectUri = Uri.parse(
-      dio.options.baseUrl,
-    ).resolve('/music/oauth/result');
-    return uri
-        .resolve('/signin')
-        .replace(
-          queryParameters: {
-            'client_id': oauth['clientId'],
-            'redirect_uri': redirectUri.toString(),
-            'app_name': 'Sylvakru',
-            'state': state,
-          },
-        );
+  /// 读取音乐应用的 FN Connect OAuth 配置（clientId + 授权目标地址）。
+  Future<(String, String)?> _nasOAuthConfig() async {
+    try {
+      final response = await dio.get(
+        '/sys/config',
+        options: Options(headers: headers),
+      );
+      final body = response.data;
+      if (body is! Map || body['code'] != 0) return null;
+      final oauth = body['data']?['nasOAuth'];
+      if (oauth is! Map || oauth['clientId'] is! String) return null;
+      final url = (oauth['url'] as String?)?.trim() ?? '';
+      final authorizeBase = url.isNotEmpty
+          ? normalizeFnBaseUrl(url)
+          : _origin;
+      if (!authorizeBase.startsWith('http')) return null;
+      return (oauth['clientId'] as String, authorizeBase);
+    } catch (_) {
+      return null;
+    }
   }
 
-  Future<bool> loginWithCode(String code) => _login(code: code);
+  /// 原生 NAS 账号登录：加密 WS 系统登录 → 静默授权 → auth-login 换 userToken。
+  /// 成功后保存免密续登凭据（longToken/secret/did），之后 token 过期可静默重登。
+  Future<bool> loginWithNasAccount({
+    required String account,
+    required String password,
+  }) async {
+    if (account.trim().isEmpty || password.isEmpty) return false;
+    final oauth = await _nasOAuthConfig();
+    if (oauth == null) return false;
+    final (clientId, authorizeBase) = oauth;
+    try {
+      final session = await FnNativeSystemLogin.login(
+        baseUrl: _origin,
+        userName: account.trim(),
+        password: password,
+      );
+      final code = await FnNativeSystemLogin.requestAuthorizeCode(
+        baseUrl: authorizeBase,
+        systemToken: session.token,
+        clientId: clientId,
+        redirectPath: '/music/oauth/result',
+        relay: _isRelay,
+      );
+      final ok = await _login(code: code);
+      if (ok &&
+          session.longToken.isNotEmpty &&
+          session.secretBase64.isNotEmpty) {
+        await FnSavedLoginStore.save(
+          _savedLoginKey,
+          longToken: session.longToken,
+          secretBase64: session.secretBase64,
+          did: session.did.isNotEmpty
+              ? session.did
+              : FnNativeSystemLogin.generateDeviceId(),
+        );
+      }
+      return ok;
+    } catch (e) {
+      logger.output(
+        '[FeiniuClient] Native NAS login failed: ${e.runtimeType}',
+      );
+      return false;
+    }
+  }
+
+  /// NAS 模式 token 过期后的静默重登：longToken 免密续登 → 静默授权 → 换 token。
+  Future<bool> _reloginViaSavedToken() async {
+    final saved = await FnSavedLoginStore.read(_savedLoginKey);
+    if (saved == null || saved.secretBase64.isEmpty) return false;
+    final oauth = await _nasOAuthConfig();
+    // 网络/配置暂时不可用时不清凭据，凭据只在确认失效后清除。
+    if (oauth == null) return false;
+    final (clientId, authorizeBase) = oauth;
+    try {
+      final session = await FnNativeSystemLogin.loginWithLongToken(
+        baseUrl: _origin,
+        longToken: saved.longToken,
+        secretBytes: base64Decode(saved.secretBase64),
+        did: saved.did.isEmpty ? null : saved.did,
+      );
+      final code = await FnNativeSystemLogin.requestAuthorizeCode(
+        baseUrl: authorizeBase,
+        systemToken: session.token,
+        clientId: clientId,
+        redirectPath: '/music/oauth/result',
+        relay: _isRelay,
+      );
+      return await _login(code: code);
+    } catch (e) {
+      logger.output(
+        '[FeiniuClient] Saved-token relogin failed: ${e.runtimeType}',
+      );
+      // 凭据已失效（改密码/撤销设备/超期），清掉避免反复尝试。
+      await FnSavedLoginStore.clear(_savedLoginKey);
+      return false;
+    }
+  }
+
+  /// 清除该服务器的免密续登凭据（删除音源时调用）。
+  static Future<void> clearSavedNasLogin(String baseUrl) async {
+    var url = baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
+    if (RegExp(r'^[a-zA-Z][a-zA-Z0-9-]{5,31}$').hasMatch(url)) {
+      url = 'https://$url.fnos.net';
+    }
+    if (!url.endsWith('/music/api/v1')) {
+      url += url.endsWith('/music') ? '/api/v1' : '/music/api/v1';
+    }
+    final uri = Uri.parse(url);
+    await FnSavedLoginStore.clear(
+      uri.host.isEmpty ? url : uri.authority,
+    );
+  }
 
   Future<bool> login() async {
     if (_token != null) return true;
@@ -101,7 +201,11 @@ class FeiniuClient extends StreamClient {
   }
 
   Future<bool> _login({String? code}) async {
-    if (code == null && _usesNasLogin) return false;
+    if (code == null && _usesNasLogin) {
+      // NAS 模式没有密码可登：走 longToken 免密续登（原会话凭据失效时返回
+      // false，由上层提示重新进行 NAS 登录）。
+      return await _reloginViaSavedToken();
+    }
     try {
       final response = await dio.post(
         code == null ? '/user/password-login' : '/user/auth-login',

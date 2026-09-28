@@ -78,6 +78,9 @@ dependencies:
   webview_flutter: ^4.14.1
   dio: ^5.9.2
   crypto: ^3.0.7
+  # FN Connect 原生登录：fnOS 系统加密 WebSocket（RSA-OAEP + AES-CBC 信封）。
+  web_socket_channel: ^3.0.3
+  pointycastle: ^3.9.1
   charset: ^2.0.1
   pool: ^1.5.2
   corner_radius_plugin: ^0.1.1
