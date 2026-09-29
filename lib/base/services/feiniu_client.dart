@@ -133,11 +133,14 @@ class FeiniuClient extends StreamClient {
 
   /// 原生 NAS 账号登录：加密 WS 系统登录 → 静默授权 → auth-login 换 userToken。
   /// 成功后保存免密续登凭据（longToken/secret/did），之后 token 过期可静默重登。
+  /// 账号或密码为空时，若已有免密凭据则直接走静默续登。
   Future<bool> loginWithNasAccount({
     required String account,
     required String password,
   }) async {
-    if (account.trim().isEmpty || password.isEmpty) return false;
+    if (account.trim().isEmpty || password.isEmpty) {
+      return await _reloginViaSavedToken();
+    }
     final oauth = await _nasOAuthConfig();
     if (oauth == null) return false;
     final (clientId, authorizeBase) = oauth;
@@ -208,7 +211,8 @@ class FeiniuClient extends StreamClient {
   }
 
   /// 清除该服务器的免密续登凭据（删除音源时调用）。
-  static Future<void> clearSavedNasLogin(String baseUrl) async {
+  /// 从用户输入推导免密凭据的存储键（与实例侧键规则一致）。
+  static String? _derivedSavedLoginKey(String baseUrl) {
     var url = baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
     if (RegExp(r'^[a-zA-Z][a-zA-Z0-9-]{5,31}$').hasMatch(url)) {
       url = 'https://$url.fnos.net';
@@ -217,7 +221,18 @@ class FeiniuClient extends StreamClient {
       url += url.endsWith('/music') ? '/api/v1' : '/music/api/v1';
     }
     final uri = Uri.parse(url);
-    await FnSavedLoginStore.clear(uri.host.isEmpty ? url : uri.authority);
+    return uri.host.isEmpty ? null : uri.authority;
+  }
+
+  /// 是否已保存该服务器的免密续登凭据。
+  static Future<bool> hasSavedNasLogin(String baseUrl) async {
+    final key = _derivedSavedLoginKey(baseUrl);
+    return key != null && await FnSavedLoginStore.read(key) != null;
+  }
+
+  static Future<void> clearSavedNasLogin(String baseUrl) async {
+    final key = _derivedSavedLoginKey(baseUrl);
+    if (key != null) await FnSavedLoginStore.clear(key);
   }
 
   Future<bool> login() async {

@@ -350,6 +350,10 @@ class FnNativeSystemLogin {
     String? did,
     Duration timeout = const Duration(seconds: 20),
   }) {
+    // 设备标识只生成一次并贯穿请求与响应解析：fnOS 登录响应不回显 did，
+    // 若在响应解析时才生成，保存的免密凭据会与 longToken 绑定的 did 不一致，
+    // 导致下次 tokenLogin 被拒（errno 65534）。
+    final effectiveDid = did ?? generateDeviceId();
     return _runEncryptedSession(
       baseUrl: baseUrl,
       timeout: timeout,
@@ -361,10 +365,10 @@ class FnNativeSystemLogin {
           'stay': 2,
           'deviceType': _deviceType,
           'deviceName': _deviceName,
-          'did': did ?? generateDeviceId(),
+          'did': effectiveDid,
           'si': si,
         });
-        return _sessionFromResponse(data, did: did);
+        return _sessionFromResponse(data, did: effectiveDid);
       },
     );
   }
@@ -383,17 +387,21 @@ class FnNativeSystemLogin {
     final channel = await _openChannel(baseUrl, timeout);
     try {
       final si = await channel.getSystemIdentifier();
+      final effectiveDid = did ?? generateDeviceId();
       final body = jsonEncode(<String, dynamic>{
         'req': 'user.tokenLogin',
         'token': longToken,
         'deviceType': _deviceType,
         'deviceName': _deviceName,
-        'did': did ?? generateDeviceId(),
+        'did': effectiveDid,
         'si': si,
       });
       final hmac = Hmac(sha256, secretBytes);
       final signed = base64Encode(hmac.convert(utf8.encode(body)).bytes) + body;
-      return _sessionFromResponse(await channel.sendPlain(signed), did: did);
+      return _sessionFromResponse(
+        await channel.sendPlain(signed),
+        did: effectiveDid,
+      );
     } on FnTwoFactorRequired {
       rethrow;
     } on FnLoginException {

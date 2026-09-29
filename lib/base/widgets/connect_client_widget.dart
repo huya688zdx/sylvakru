@@ -306,8 +306,11 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
         config.embyUsername = usernameTmp.text;
         config.embyPassword = passwordTmp.text;
       } else if (widget.sourceType == .feiniu) {
+        // 账号密码为空时，若该服务器已保存免密续登凭据则允许直接静默续登；
+        // 否则要求填写（首次 NAS 登录必须提供 fn 账号密码）。
         if (nasLogin &&
-            (usernameTmp.text.trim().isEmpty || passwordTmp.text.isEmpty)) {
+            (usernameTmp.text.trim().isEmpty || passwordTmp.text.isEmpty) &&
+            !await FeiniuClient.hasSavedNasLogin(baseUrlTmp.text)) {
           if (mounted) {
             showCenterMessage(l10n.feiniuNasLoginFailed);
           }
