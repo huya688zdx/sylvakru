@@ -12,30 +12,31 @@ import 'package:sylvakru/base/services/stream_client.dart';
 
 class FeiniuClient extends StreamClient {
   String? _token;
-  bool _usesNasLogin;
   Future<bool>? _loginFuture;
+  bool _isRelay = false;
   late final String _deviceId;
-  late final bool _isRelay;
-
-  String? get token => _token;
 
   FeiniuClient({
     required super.baseUrl,
     required super.username,
     required super.password,
-    String? token,
-  }) : _token = token,
-       _usesNasLogin = token != null {
+  }) {
     final random = Random.secure();
     _deviceId = List.generate(
       16,
       (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
     ).join();
-    var url = baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
-    if (RegExp(r'^[a-zA-Z][a-zA-Z0-9-]{5,31}$').hasMatch(url)) {
-      url = 'https://$url.fnos.net';
+
+    String url = baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
+
+    if (!baseUrl.startsWith('http')) {
+      url = 'https://$baseUrl.fnos.net';
     }
-    _isRelay = Uri.parse(url).host.endsWith('.fnos.net');
+
+    if (url.contains('fnos.net')) {
+      _isRelay = true;
+    }
+
     if (!url.endsWith('/music/api/v1')) {
       url += url.endsWith('/music') ? '/api/v1' : '/music/api/v1';
     }
@@ -58,35 +59,6 @@ class FeiniuClient extends StreamClient {
       ].join('; '),
   };
 
-  Future<Uri?> getNasLoginUrl({required String state}) async {
-    final response = await dio.get(
-      '/sys/config',
-      options: Options(headers: headers),
-    );
-    final body = response.data;
-    if (body is! Map || body['code'] != 0) return null;
-    final oauth = body['data']?['nasOAuth'];
-    if (oauth is! Map || oauth['clientId'] is! String) return null;
-    final url = oauth['url'] as String?;
-    final uri = Uri.parse(url?.isNotEmpty == true ? url! : dio.options.baseUrl);
-    if (uri.scheme != 'http' && uri.scheme != 'https') return null;
-    final redirectUri = Uri.parse(
-      dio.options.baseUrl,
-    ).resolve('/music/oauth/result');
-    return uri
-        .resolve('/signin')
-        .replace(
-          queryParameters: {
-            'client_id': oauth['clientId'],
-            'redirect_uri': redirectUri.toString(),
-            'app_name': 'Sylvakru',
-            'state': state,
-          },
-        );
-  }
-
-  Future<bool> loginWithCode(String code) => _login(code: code);
-
   Future<bool> login() async {
     if (_token != null) return true;
     final pending = _loginFuture;
@@ -100,17 +72,13 @@ class FeiniuClient extends StreamClient {
     }
   }
 
-  Future<bool> _login({String? code}) async {
-    if (code == null && _usesNasLogin) return false;
+  Future<bool> _login() async {
     try {
       final response = await dio.post(
-        code == null ? '/user/password-login' : '/user/auth-login',
+        '/user/password-login',
         data: {
-          if (code == null) ...{
-            'username': username.trim(),
-            'password': sha256.convert(utf8.encode(password)).toString(),
-          } else
-            'code': code,
+          'username': username.trim(),
+          'password': sha256.convert(utf8.encode(password)).toString(),
           'deviceId': _deviceId,
         },
         options: Options(headers: headers),
@@ -125,7 +93,6 @@ class FeiniuClient extends StreamClient {
       final data = body['data'];
       _token = data is Map ? data['userToken'] as String? : null;
       if (_token?.isEmpty == true) _token = null;
-      if (_token != null && code != null) _usesNasLogin = true;
       return _token?.isNotEmpty == true;
     } on DioException catch (e) {
       logger.output(

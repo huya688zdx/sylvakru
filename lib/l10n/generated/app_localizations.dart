@@ -2318,28 +2318,10 @@ abstract class AppLocalizations {
   /// **'Feiniu Music'**
   String get feiniuMusic;
 
-  /// No description provided for @feiniuServerAddress.
-  ///
-  /// In en, this message translates to:
-  /// **'URL / FN ID'**
-  String get feiniuServerAddress;
-
-  /// No description provided for @feiniuNasLogin.
-  ///
-  /// In en, this message translates to:
-  /// **'Sign in with NAS account'**
-  String get feiniuNasLogin;
-
-  /// No description provided for @feiniuNasLoginFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'NAS authorization was not completed. Check the address and try again.'**
-  String get feiniuNasLoginFailed;
-
   /// No description provided for @feiniuConnectionFailed.
   ///
   /// In en, this message translates to:
-  /// **'Unable to connect to FnOS Music. Check the server URL and your music app username and password.'**
+  /// **'Unable to connect to Feiniu Music. Check the server URL and your music app username and password.'**
   String get feiniuConnectionFailed;
 
   /// No description provided for @savedSuccessfully.
