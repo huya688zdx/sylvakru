@@ -8,6 +8,7 @@ import 'package:sylvakru/base/data/loader.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/services/emby_client.dart';
 import 'package:sylvakru/base/services/feiniu_client.dart';
+import 'package:sylvakru/base/services/fn_native_login.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/navidrome_client.dart';
@@ -312,12 +313,50 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
           }
           return;
         }
+        var chosenBaseUrl = baseUrlTmp.text.trim();
+        if (nasLogin) {
+          final fnId = FeiniuClient.extractFnId(chosenBaseUrl);
+          if (fnId != null && mounted) {
+            // 查询 FN Connect 连接候选（局域网/公网/DDNS/中继），让用户
+            // 自行选择连接方式（与官方客户端的连接信息一致）。
+            List<FnConnectCandidate> candidates;
+            try {
+              candidates = await FnNativeSystemLogin.discoverCandidates(
+                fnId: fnId,
+              );
+            } catch (_) {
+              candidates = const <FnConnectCandidate>[];
+            }
+            if (!mounted) return;
+            if (candidates.isNotEmpty) {
+              final choice = await showConnectChooserDialog(
+                context,
+                candidates,
+              );
+              if (!mounted || choice == null) return;
+              if (choice.auto) {
+                // 自动：直连优先，逐个探测可达性，全失败回退官方中继。
+                String? reachable;
+                for (final candidate in candidates) {
+                  if (await FeiniuClient.probeCandidate(candidate)) {
+                    reachable = candidate.baseUrl;
+                    break;
+                  }
+                }
+                if (!mounted) return;
+                chosenBaseUrl = reachable ?? 'https://$fnId.fnos.net';
+              } else {
+                chosenBaseUrl = choice.candidate!.baseUrl;
+              }
+            }
+          }
+        }
         final feiniuClient = FeiniuClient(
-          baseUrl: baseUrlTmp.text,
+          baseUrl: chosenBaseUrl,
           username: usernameTmp.text,
           password: passwordTmp.text,
           token:
-              baseUrlTmp.text == config.feiniuBaseUrl &&
+              chosenBaseUrl == config.feiniuBaseUrl &&
                   usernameTmp.text == config.feiniuUsername &&
                   passwordTmp.text == config.feiniuPassword
               ? config.feiniuToken
@@ -388,5 +427,87 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
         await Loader.sync();
       }
     }
+  }
+}
+
+/// 连接方式选择结果：auto = 直连优先自动挑选；否则使用指定候选。
+class ConnectChoice {
+  final bool auto;
+  final FnConnectCandidate? candidate;
+
+  const ConnectChoice.auto() : auto = true, candidate = null;
+
+  const ConnectChoice.pick(FnConnectCandidate this.candidate) : auto = false;
+}
+
+/// 选择 NAS 连接方式（与官方客户端的连接信息一致）：
+/// 自动（直连优先，失败回中继）或手动指定局域网/公网/DDNS/中继地址。
+Future<ConnectChoice?> showConnectChooserDialog(
+  BuildContext context,
+  List<FnConnectCandidate> candidates,
+) {
+  return showDialog<ConnectChoice>(
+    context: context,
+    builder: (context) => _ConnectChooserDialog(candidates: candidates),
+  );
+}
+
+class _ConnectChooserDialog extends StatefulWidget {
+  final List<FnConnectCandidate> candidates;
+
+  const _ConnectChooserDialog({required this.candidates});
+
+  @override
+  State<_ConnectChooserDialog> createState() => _ConnectChooserDialogState();
+}
+
+class _ConnectChooserDialogState extends State<_ConnectChooserDialog> {
+  int _selected = -1; // -1 = 自动
+
+  @override
+  Widget build(BuildContext context) {
+    final options = <Widget>[
+      RadioListTile<int>(
+        value: -1,
+        groupValue: _selected,
+        onChanged: (value) => setState(() => _selected = value ?? -1),
+        title: const Text('自动选择'),
+        subtitle: const Text('直连优先，失败回退官方中继'),
+      ),
+      for (var i = 0; i < widget.candidates.length; i++)
+        RadioListTile<int>(
+          value: i,
+          groupValue: _selected,
+          onChanged: (value) => setState(() => _selected = value ?? -1),
+          title: Text(widget.candidates[i].label),
+          subtitle: Text(
+            widget.candidates[i].baseUrl.replaceAll(RegExp(r'^https?://'), ''),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+    ];
+
+    return AlertDialog(
+      title: const Text('选择连接方式'),
+      content: SizedBox(
+        width: 420,
+        child: ListView(shrinkWrap: true, children: options),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(
+            context,
+            _selected < 0
+                ? const ConnectChoice.auto()
+                : ConnectChoice.pick(widget.candidates[_selected]),
+          ),
+          child: const Text('确定'),
+        ),
+      ],
+    );
   }
 }

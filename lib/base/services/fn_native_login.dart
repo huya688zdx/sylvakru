@@ -17,11 +17,13 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart' show Hmac, sha256;
+import 'package:crypto/crypto.dart' show Hmac, md5, sha256;
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/api.dart';
 import 'package:pointycastle/asymmetric/api.dart' show RSAPublicKey;
@@ -113,8 +115,7 @@ class FnSavedLoginStore {
     try {
       final token = await _storage.read(key: '${_prefix(serverKey)}/longToken');
       if (token == null || token.isEmpty) return null;
-      final secret =
-          await _storage.read(key: '${_prefix(serverKey)}/secret');
+      final secret = await _storage.read(key: '${_prefix(serverKey)}/secret');
       final did = await _storage.read(key: '${_prefix(serverKey)}/did');
       return FnSavedLogin(
         longToken: token,
@@ -135,10 +136,14 @@ class FnSavedLoginStore {
     if (serverKey.trim().isEmpty || longToken.isEmpty) return;
     try {
       await _storage.write(
-          key: '${_prefix(serverKey)}/longToken', value: longToken);
+        key: '${_prefix(serverKey)}/longToken',
+        value: longToken,
+      );
       if (secretBase64.isNotEmpty) {
         await _storage.write(
-            key: '${_prefix(serverKey)}/secret', value: secretBase64);
+          key: '${_prefix(serverKey)}/secret',
+          value: secretBase64,
+        );
       }
       if (did.isNotEmpty) {
         await _storage.write(key: '${_prefix(serverKey)}/did', value: did);
@@ -158,18 +163,71 @@ class FnSavedLoginStore {
   }
 }
 
+/// FN Connect 连接候选：一个可尝试的直连/中继地址。
+class FnConnectCandidate {
+  /// 展示用类型标签（局域网 / 公网 / DDNS / 官方中继）。
+  final String label;
+
+  /// 候选源头（含协议与端口），音乐 API 与系统 WS 都基于它。
+  final String baseUrl;
+
+  /// 是否为官方中继域（需要 mode=relay cookie，证书可信）。
+  final bool relay;
+
+  const FnConnectCandidate({
+    required this.label,
+    required this.baseUrl,
+    required this.relay,
+  });
+
+  @override
+  String toString() =>
+      '$label  ${baseUrl.replaceAll(RegExp(r'^https?://'), '')}';
+}
+
 /// fnOS 系统加密 WebSocket 登录与静默授权的纯原生实现。
 class FnNativeSystemLogin {
   static const String _deviceType = 'pc';
   static const String _deviceName = 'Sylvakru';
 
+  /// FN Connect 云端服务（地址发现）。
+  static const String _fnServiceBaseUrl = 'https://fnos.net';
+  static const String _fnServicePath = '/api/v1/fn/con';
+  // 与官方客户端一致的签名常量（公开于客户端内）。
+  static const String _authxKey = 'NDzZTVxnRKP8Z0jXg1VAMonaG8akvh';
+  static const String _fnApiKey = 'zIGtkc3dqZnJpd29qZXJqa2w7c';
+
+  static final RegExp _fnIdPattern = RegExp(r'^[a-zA-Z][a-zA-Z0-9-]{5,31}$');
+
+  /// 从用户输入中提取 FN ID（裸 FN ID / *.fnos.net / fnos.net/<fnid>）。
+  static String? extractFnId(String input) {
+    final trimmed = input.trim();
+    if (_fnIdPattern.hasMatch(trimmed)) return trimmed;
+    final candidate = trimmed.contains('://') ? trimmed : 'https://$trimmed';
+    final uri = Uri.tryParse(candidate);
+    final host = uri?.host.toLowerCase() ?? '';
+    if (host.endsWith('.fnos.net')) {
+      final sub = host.substring(0, host.length - '.fnos.net'.length);
+      if (_fnIdPattern.hasMatch(sub)) return sub;
+    }
+    if (host == 'fnos.net' || host == 'www.fnos.net') {
+      for (final segment in uri!.pathSegments) {
+        final normalized = segment.trim().toLowerCase();
+        if (_fnIdPattern.hasMatch(normalized)) return normalized;
+      }
+    }
+    return null;
+  }
+
   /// 推导系统 WebSocket 地址（https→wss，http→ws，路径固定 /websocket）。
   static String webSocketUrlOf(String baseUrl) {
     final uri = Uri.parse(normalizeFnBaseUrl(baseUrl));
-    return uri.replace(
-      scheme: uri.scheme.toLowerCase() == 'https' ? 'wss' : 'ws',
-      path: '/websocket',
-    ).toString();
+    return uri
+        .replace(
+          scheme: uri.scheme.toLowerCase() == 'https' ? 'wss' : 'ws',
+          path: '/websocket',
+        )
+        .toString();
   }
 
   static bool isRelayHost(String baseUrl) {
@@ -178,6 +236,107 @@ class FnNativeSystemLogin {
         host.endsWith('.fnos.net') ||
         host == '5ddd.com' ||
         host.endsWith('.5ddd.com');
+  }
+
+  /// 构造信任指定主机自签名证书的 HttpClient（fnOS 局域网/直连 https 用）。
+  static HttpClient trustedHttpClient(String baseUrl) {
+    final host = Uri.parse(normalizeFnBaseUrl(baseUrl)).host;
+    final client = HttpClient();
+    client.badCertificateCallback = (cert, certHost, port) => certHost == host;
+    return client;
+  }
+
+  /// FN Connect 连接候选：查询云端地址发现接口，构建"局域网/公网/DDNS/中继"
+  /// 候选列表（与官方客户端的连接信息一致），供用户自行选择连接方式。
+  static Future<List<FnConnectCandidate>> discoverCandidates({
+    required String fnId,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final body = <String, dynamic>{'fnId': fnId};
+    final bodyText = jsonEncode(body);
+    final nonce = (Random().nextInt(900000) + 100000).toString();
+    final fnSign = sha256
+        .convert(utf8.encode('trim_connect`$fnId`$timestamp`anna'))
+        .toString();
+    final payloadMd5 = md5.convert(utf8.encode(bodyText)).toString();
+    final authRaw = [
+      _authxKey,
+      _fnServicePath,
+      nonce,
+      '$timestamp',
+      payloadMd5,
+      _fnApiKey,
+    ].join('_');
+    final authx =
+        'nonce=$nonce&timestamp=$timestamp&sign=${md5.convert(utf8.encode(authRaw))}';
+
+    final dio = Dio()
+      ..options.baseUrl = _fnServiceBaseUrl
+      ..options.connectTimeout = timeout
+      ..options.receiveTimeout = timeout;
+    final response = await dio.post(
+      _fnServicePath,
+      data: body,
+      options: Options(
+        headers: {
+          'Content-Type': 'application/json',
+          'Authx': authx,
+          'fn-sign': fnSign,
+        },
+      ),
+    );
+    final payload = response.data;
+    if (payload is! Map || payload['code'] != 0) {
+      throw FnLoginException(
+        'fn connect discovery failed: ${payload is Map ? payload['msg'] ?? payload['code'] : 'invalid response'}',
+      );
+    }
+    final data = payload['data'];
+    if (data is! Map) {
+      throw const FnLoginException('fn connect discovery missing data');
+    }
+    List<String> listOf(String key) => [
+      for (final v in (data[key] as List? ?? const []))
+        if (v != null) v.toString(),
+    ];
+    // 端口在 data.port 子对象里；旧固件可能缺省（兜底 5666/5667）。
+    final portMap = data['port'] is Map ? data['port'] as Map : const {};
+    final httpsPort = portMap['httpsPort'] is num
+        ? (portMap['httpsPort'] as num).toInt()
+        : 5667;
+    final candidates = <FnConnectCandidate>[];
+    final seen = <String>{};
+    void add(String label, String baseUrl, {bool relay = false}) {
+      final normalized = normalizeFnBaseUrl(baseUrl);
+      if (normalized.isEmpty || !seen.add(normalized.toLowerCase())) return;
+      candidates.add(
+        FnConnectCandidate(label: label, baseUrl: normalized, relay: relay),
+      );
+    }
+
+    for (final addr in listOf('ipv4')) {
+      add('局域网 (IPv4)', 'https://$addr:$httpsPort');
+    }
+    for (final addr in listOf('ipv6')) {
+      add('局域网 (IPv6)', 'https://[$addr]:$httpsPort');
+    }
+    for (final addr in listOf('ddns')) {
+      add('DDNS', 'https://$addr:$httpsPort');
+    }
+    for (final addr in listOf('publicIpv4')) {
+      add('公网 (IPv4)', 'https://$addr:$httpsPort');
+    }
+    for (final addr in listOf('publicIpv6')) {
+      add('公网 (IPv6)', 'https://[$addr]:$httpsPort');
+    }
+    for (final host in listOf('fn')) {
+      add('官方中继', 'https://$host', relay: true);
+    }
+    if (candidates.isEmpty) {
+      throw const FnLoginException('fn connect discovery returned no address');
+    }
+    return candidates;
   }
 
   /// 账号密码登录系统。
@@ -233,8 +392,7 @@ class FnNativeSystemLogin {
         'si': si,
       });
       final hmac = Hmac(sha256, secretBytes);
-      final signed =
-          base64Encode(hmac.convert(utf8.encode(body)).bytes) + body;
+      final signed = base64Encode(hmac.convert(utf8.encode(body)).bytes) + body;
       return _sessionFromResponse(await channel.sendPlain(signed), did: did);
     } on FnTwoFactorRequired {
       rethrow;
@@ -265,6 +423,11 @@ class FnNativeSystemLogin {
       ..options.baseUrl = normalized
       ..options.connectTimeout = timeout
       ..options.receiveTimeout = timeout;
+    // 直连 https（fnOS 自签名证书）时信任该主机。
+    if (!relay) {
+      dio.httpClientAdapter = IOHttpClientAdapter()
+        ..createHttpClient = () => trustedHttpClient(normalized);
+    }
     final body = <String, dynamic>{
       'token': systemToken,
       'client_id': clientId,
@@ -292,8 +455,7 @@ class FnNativeSystemLogin {
       );
     }
     final data = payload['data'];
-    final code =
-        data is Map ? (data['code'] ?? '').toString().trim() : '';
+    final code = data is Map ? (data['code'] ?? '').toString().trim() : '';
     if (code.isEmpty) {
       throw const FnLoginException('authorize response missing code');
     }
@@ -306,8 +468,7 @@ class FnNativeSystemLogin {
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    final hex =
-        bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
@@ -346,8 +507,10 @@ class FnNativeSystemLogin {
     required String baseUrl,
     required Duration timeout,
     required Future<FnSystemSession> Function(
-            _EncryptedWebSocket channel, String si)
-        action,
+      _EncryptedWebSocket channel,
+      String si,
+    )
+    action,
   }) async {
     final channel = await _openChannel(baseUrl, timeout);
     try {
@@ -370,13 +533,14 @@ class FnNativeSystemLogin {
     String baseUrl,
     Duration timeout,
   ) {
+    final relay = isRelayHost(baseUrl);
     final url = webSocketUrlOf(baseUrl);
-    final headers = <String, String>{
-      if (isRelayHost(baseUrl)) 'Cookie': 'mode=relay',
-    };
+    final headers = <String, String>{if (relay) 'Cookie': 'mode=relay'};
+    // 直连 wss（fnOS 自签名证书）时信任该主机。
     return _EncryptedWebSocket.connect(
       url: url,
       headers: headers,
+      customClient: relay ? null : trustedHttpClient(baseUrl),
       timeout: timeout,
     );
   }
@@ -402,9 +566,13 @@ class _EncryptedWebSocket {
     required String url,
     required Map<String, String> headers,
     required Duration timeout,
+    HttpClient? customClient,
   }) async {
-    final channel =
-        IOWebSocketChannel.connect(Uri.parse(url), headers: headers);
+    final channel = IOWebSocketChannel.connect(
+      Uri.parse(url),
+      headers: headers,
+      customClient: customClient,
+    );
     await channel.ready.timeout(timeout);
     return _EncryptedWebSocket._(channel, timeout);
   }
@@ -426,9 +594,11 @@ class _EncryptedWebSocket {
     }
     final random = Random.secure();
     _key = Uint8List.fromList(
-        List<int>.generate(32, (_) => random.nextInt(256)));
-    _iv =
-        Uint8List.fromList(List<int>.generate(16, (_) => random.nextInt(256)));
+      List<int>.generate(32, (_) => random.nextInt(256)),
+    );
+    _iv = Uint8List.fromList(
+      List<int>.generate(16, (_) => random.nextInt(256)),
+    );
     _rsaEnvelope = _encryptRsaOaep(parseSpkiPem(pubPem), _key!);
   }
 
@@ -446,11 +616,13 @@ class _EncryptedWebSocket {
       'req': 'encrypted',
       'iv': base64Encode(iv),
       'rsa': base64Encode(rsaEnvelope),
-      'aes': base64Encode(encryptAesCbcPkcs7(
-        key: key,
-        iv: iv,
-        input: utf8.encode(jsonEncode(innerRequest)),
-      )),
+      'aes': base64Encode(
+        encryptAesCbcPkcs7(
+          key: key,
+          iv: iv,
+          input: utf8.encode(jsonEncode(innerRequest)),
+        ),
+      ),
       'si': innerRequest['si'] ?? '',
       'v': 1,
     });
@@ -463,11 +635,13 @@ class _EncryptedWebSocket {
     final secretField = (decrypted['secret'] ?? '').toString();
     if (secretField.isNotEmpty) {
       try {
-        decrypted['secret'] = base64Encode(decryptAesCbcPkcs7Bytes(
-          key: key,
-          iv: iv,
-          input: base64Decode(secretField),
-        ));
+        decrypted['secret'] = base64Encode(
+          decryptAesCbcPkcs7Bytes(
+            key: key,
+            iv: iv,
+            input: base64Decode(secretField),
+          ),
+        );
       } catch (_) {
         // 解不出原始 secret 时保留原值，免密续登将不可用。
       }
@@ -488,10 +662,13 @@ class _EncryptedWebSocket {
     final completer = Completer<Map<String, dynamic>>();
     _pending[tag] = completer;
     _channel.sink.add(payload);
-    return completer.future.timeout(_timeout, onTimeout: () {
-      _pending.remove(tag);
-      throw TimeoutException('fn system websocket request timeout');
-    });
+    return completer.future.timeout(
+      _timeout,
+      onTimeout: () {
+        _pending.remove(tag);
+        throw TimeoutException('fn system websocket request timeout');
+      },
+    );
   }
 
   void _onData(dynamic frame) {
@@ -500,8 +677,8 @@ class _EncryptedWebSocket {
       final text = frame is String
           ? frame
           : frame is List<int>
-              ? utf8.decode(frame)
-              : null;
+          ? utf8.decode(frame)
+          : null;
       if (text == null) return;
       final decoded = jsonDecode(text);
       if (decoded is Map<String, dynamic>) message = decoded;
@@ -553,10 +730,13 @@ class _EncryptedWebSocket {
     final completer = Completer<Map<String, dynamic>>();
     _pending[reqId] = completer;
     _channel.sink.add(jsonEncode({...request, 'reqid': reqId}));
-    return completer.future.timeout(_timeout, onTimeout: () {
-      _pending.remove(reqId);
-      throw TimeoutException('fn system websocket request timeout');
-    });
+    return completer.future.timeout(
+      _timeout,
+      onTimeout: () {
+        _pending.remove(reqId);
+        throw TimeoutException('fn system websocket request timeout');
+      },
+    );
   }
 
   Future<void> close() async {
@@ -613,14 +793,13 @@ PaddedBlockCipher _paddedCipher(
   Uint8List iv, {
   bool forEncryption = true,
 }) {
-  return PaddedBlockCipherImpl(PKCS7Padding(), CBCBlockCipher(AESEngine()))
-    ..init(
-      forEncryption,
-      PaddedBlockCipherParameters(
-        ParametersWithIV(KeyParameter(key), iv),
-        null,
-      ),
-    );
+  return PaddedBlockCipherImpl(
+    PKCS7Padding(),
+    CBCBlockCipher(AESEngine()),
+  )..init(
+    forEncryption,
+    PaddedBlockCipherParameters(ParametersWithIV(KeyParameter(key), iv), null),
+  );
 }
 
 Uint8List _encryptRsaOaep(RSAPublicKey publicKey, Uint8List input) {
@@ -636,11 +815,7 @@ class _DerTlv {
   final Uint8List content;
   final int next;
 
-  const _DerTlv({
-    required this.tag,
-    required this.content,
-    required this.next,
-  });
+  const _DerTlv({required this.tag, required this.content, required this.next});
 }
 
 _DerTlv _readTlv(Uint8List bytes, int pos) {
@@ -667,7 +842,10 @@ _DerTlv _readTlv(Uint8List bytes, int pos) {
   return _DerTlv(
     tag: tag,
     content: Uint8List.sublistView(
-        bytes, pos + headerSize, pos + headerSize + length),
+      bytes,
+      pos + headerSize,
+      pos + headerSize + length,
+    ),
     next: pos + headerSize + length,
   );
 }
@@ -675,7 +853,9 @@ _DerTlv _readTlv(Uint8List bytes, int pos) {
 BigInt _derIntegerToBigInt(Uint8List content) {
   if (content.isEmpty) return BigInt.zero;
   final hex = content
-      .map((b) => '${(b >> 4).toRadixString(16)}${(b & 0x0f).toRadixString(16)}')
+      .map(
+        (b) => '${(b >> 4).toRadixString(16)}${(b & 0x0f).toRadixString(16)}',
+      )
       .join();
   return BigInt.parse(hex, radix: 16);
 }

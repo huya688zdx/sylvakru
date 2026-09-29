@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/my_audio_metadata.dart';
@@ -48,6 +49,45 @@ class FeiniuClient extends StreamClient {
         sendTimeout: const Duration(seconds: 15),
       ),
     );
+    // 直连 https（fnOS 自签名证书）时信任该主机。
+    if (url.startsWith('https') && !_isRelay) {
+      final host = Uri.parse(url).host;
+      dio.httpClientAdapter = IOHttpClientAdapter()
+        ..createHttpClient = () {
+          final client = HttpClient();
+          client.badCertificateCallback = (cert, certHost, port) =>
+              certHost == host;
+          return client;
+        };
+    }
+  }
+
+  /// 从用户输入提取 FN ID（裸 FN ID / *.fnos.net / fnos.net/<fnid>）。
+  static String? extractFnId(String input) =>
+      FnNativeSystemLogin.extractFnId(input);
+
+  /// 探测候选地址是否可达（快速请求音乐 sys/config）。
+  static Future<bool> probeCandidate(FnConnectCandidate candidate) async {
+    try {
+      final dio = Dio()
+        ..options.baseUrl = candidate.baseUrl
+        ..options.connectTimeout = const Duration(seconds: 3)
+        ..options.receiveTimeout = const Duration(seconds: 3);
+      if (!candidate.relay) {
+        dio.httpClientAdapter = IOHttpClientAdapter()
+          ..createHttpClient = () =>
+              FnNativeSystemLogin.trustedHttpClient(candidate.baseUrl);
+      }
+      final response = await dio.get(
+        '/music/api/v1/sys/config',
+        options: Options(
+          headers: {if (candidate.relay) 'Cookie': 'mode=relay'},
+        ),
+      );
+      return response.data is Map && response.data['code'] == 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// fnOS 源头地址（去掉 /music/api/v1 后缀），系统 WS 与 OAuth 都在这里。
@@ -59,9 +99,8 @@ class FeiniuClient extends StreamClient {
   }
 
   /// 免密续登凭据的存储键（按 fnOS 服务器隔离）。
-  String get _savedLoginKey => Uri.parse(_origin).host.isEmpty
-      ? _origin
-      : Uri.parse(_origin).authority;
+  String get _savedLoginKey =>
+      Uri.parse(_origin).host.isEmpty ? _origin : Uri.parse(_origin).authority;
 
   @override
   Map<String, String> get headers => {
@@ -84,9 +123,7 @@ class FeiniuClient extends StreamClient {
       final oauth = body['data']?['nasOAuth'];
       if (oauth is! Map || oauth['clientId'] is! String) return null;
       final url = (oauth['url'] as String?)?.trim() ?? '';
-      final authorizeBase = url.isNotEmpty
-          ? normalizeFnBaseUrl(url)
-          : _origin;
+      final authorizeBase = url.isNotEmpty ? normalizeFnBaseUrl(url) : _origin;
       if (!authorizeBase.startsWith('http')) return null;
       return (oauth['clientId'] as String, authorizeBase);
     } catch (_) {
@@ -132,9 +169,7 @@ class FeiniuClient extends StreamClient {
       }
       return ok;
     } catch (e) {
-      logger.output(
-        '[FeiniuClient] Native NAS login failed: ${e.runtimeType}',
-      );
+      logger.output('[FeiniuClient] Native NAS login failed: ${e.runtimeType}');
       return false;
     }
   }
@@ -182,9 +217,7 @@ class FeiniuClient extends StreamClient {
       url += url.endsWith('/music') ? '/api/v1' : '/music/api/v1';
     }
     final uri = Uri.parse(url);
-    await FnSavedLoginStore.clear(
-      uri.host.isEmpty ? url : uri.authority,
-    );
+    await FnSavedLoginStore.clear(uri.host.isEmpty ? url : uri.authority);
   }
 
   Future<bool> login() async {
