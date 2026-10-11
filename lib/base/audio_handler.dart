@@ -3,10 +3,13 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sylvakru/base/data/loader.dart';
+import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/data/setting.dart';
+import 'package:sylvakru/base/services/home_widget_service.dart';
 import 'package:sylvakru/base/services/my_window_listener.dart';
 import 'package:sylvakru/base/services/picture_service.dart';
 import 'package:sylvakru/base/services/play_queue_logic.dart';
@@ -111,6 +114,12 @@ int? restoredPlaybackIndex(int currentIndex, int queueLength) {
   return currentIndex < queueLength ? currentIndex : 0;
 }
 
+final currentLyricsIndexNotifier = ValueNotifier(-1);
+
+final controlCenterLyricsNotifier = ValueNotifier(false);
+
+bool loadingSong = false;
+
 Future<void> initAudioService() async {
   MediaKit.ensureInitialized();
   audioHandler = await AudioService.init(
@@ -150,6 +159,26 @@ Future<void> initAudioService() async {
       audioHandler.pause();
     }
   });
+
+  if (isMobile) {
+    const channel = MethodChannel('com.afalphy.audio_control');
+
+    channel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'toggleFavorite':
+          if (currentSongNotifier.value != null) {
+            toggleFavoriteState(currentSongNotifier.value!);
+          }
+        case 'skipToPrevious':
+          audioHandler.skipToPrevious();
+        case 'togglePlay':
+          audioHandler.togglePlay();
+        case 'skipToNext':
+          audioHandler.skipToNext();
+        default:
+      }
+    });
+  }
 }
 
 class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
@@ -264,6 +293,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       }
       unawaited(_superLyric.publishAt(position));
     });
+    _player.stream.position.listen(_updateCurrentLyricIndex);
     _player.stream.duration.listen((duration) {
       if (!_usbExclusiveActive) _durationController.add(duration);
     });
@@ -432,7 +462,56 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     setting.save();
   }
 
-  void updateIsPlaying(bool isPlaying) {
+  void _updateCurrentLyricIndex(Duration position) {
+    final currentSong = currentSongNotifier.value;
+    if (currentSong == null ||
+        loadingSong ||
+        position < Duration.zero ||
+        currentSongNotifier.value!.parsedLyrics == null) {
+      return;
+    }
+    int tmp = currentLyricsIndexNotifier.value;
+    final lines = currentSong.parsedLyrics!.lines;
+
+    position += Duration(milliseconds: currentSong.lyricsTimeOffset);
+
+    if (tmp >= 0 &&
+        tmp + 1 < lines.length &&
+        position >= lines[tmp].start &&
+        position <= lines[tmp + 1].start) {
+      return;
+    }
+
+    int current = -1;
+    if (position >= lines.last.start) {
+      current = lines.length - 1;
+    } else {
+      for (int i = 0; i < lines.length; i++) {
+        final line = lines[i];
+        if (position < line.start) {
+          break;
+        }
+        if (current == -1 || line.start > lines[current].start) {
+          current = i;
+        }
+      }
+    }
+
+    if (current != currentLyricsIndexNotifier.value) {
+      currentLyricsIndexNotifier.value = current;
+
+      if (controlCenterLyricsNotifier.value) {
+        updateServiceMediaItem(currentSong, lyric: lines[current].text);
+        updatePlaybackState();
+      }
+
+      if (Platform.isIOS) {
+        HomeWidgetService.updateLyricsIndex();
+      }
+    }
+  }
+
+  void updateIsPlaying(bool isPlaying) async {
     if (isPlaying) {
       _playLastSyncTime = DateTime.now();
     } else if (_playLastSyncTime != null) {
@@ -445,6 +524,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       if (!windowIsClosed) {
         setupTaskbar();
       }
+    } else if (Platform.isIOS) {
+      HomeWidgetService.updateIsPlaying();
     }
   }
 
@@ -1121,6 +1202,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     currentSongNotifier.value = null;
     currentCoverArtColor = Colors.grey;
     saveAllStates();
+
+    if (Platform.isIOS) {
+      HomeWidgetService.updateNowPlayingWidget();
+      HomeWidgetService.reloadPlaylistsWidget();
+    }
   }
 
   Future<void> justClear() async {
@@ -1149,6 +1235,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     currentIndex = -1;
     currentSongNotifier.value = null;
     currentCoverArtColor = Colors.grey;
+
+    if (Platform.isIOS) {
+      HomeWidgetService.updateNowPlayingWidget();
+      HomeWidgetService.reloadPlaylistsWidget();
+    }
   }
 
   List<MyAudioMetadata> getNewQueue(List<MyAudioMetadata> oldQueue) {
@@ -1220,20 +1311,9 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       if (_playLastSyncTime != null) {
         _playedDuration += DateTime.now().difference(_playLastSyncTime!);
       }
-
-      int durationSeconds = getDuration(currentSongNotifier.value).inSeconds;
-      // fix wrong duration
-      if (durationSeconds <= 0) {
-        durationSeconds = _player.state.duration.inSeconds;
-        if (durationSeconds > 0 && isNotStreamSource) {
-          await library.updateDuration(
-            currentSongNotifier.value!,
-            _player.state.duration,
-          );
-        }
-      }
-      if (durationSeconds > 0) {
-        double times = _playedDuration.inSeconds / durationSeconds;
+      if (_player.state.duration.inSeconds > 0) {
+        double times =
+            _playedDuration.inSeconds / _player.state.duration.inSeconds;
         if (times > 0.5) {
           library.tryAddCache(previousSong);
           history.addSongTimes(previousSong, times.round());
@@ -1247,6 +1327,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     savePlayState();
 
     final currentSong = playQueue[currentIndex];
+
+    loadingSong = true;
 
     unawaited(library.supplementReplayGainForPlayback(currentSong));
     // 歌词/封面色可能走网络：不阻塞切歌，先更新当前曲目并继续起播，
@@ -1284,6 +1366,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
 
     isLoading = true;
     final replacingUsbExclusive = _usbExclusiveActive;
+    currentLyricsIndexNotifier.value = -1;
+
     try {
       if (!replacingUsbExclusive) {
         await _stopExclusiveIntentionally();
@@ -1347,7 +1431,6 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
       _player.stop();
       logger.output("[${currentSong.title}] $error");
     }
-    isLoading = false;
 
     updateServiceMediaItem(currentSong);
 
@@ -1361,6 +1444,14 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     updatePlaybackState(postion: startPosition);
     _prefetchNextSongCache();
     if (start == null) _positionState.writeAsString('0');
+
+    loadingSong = false;
+
+    if (Platform.isIOS) {
+      HomeWidgetService.updateNowPlayingWidget();
+      // update colors
+      HomeWidgetService.reloadPlaylistsWidget();
+    }
   }
 
   /// 独占模式连播优化：当前曲开播后预下载队列下一首云端歌曲，
@@ -1804,7 +1895,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     return status.bestAvailableSampleRate;
   }
 
-  void updateServiceMediaItem(MyAudioMetadata currentSong) {
+  void updateServiceMediaItem(MyAudioMetadata currentSong, {String? lyric}) {
     Uri? artUri;
 
     if (currentSong.picture.isExist) {
@@ -1814,7 +1905,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     mediaItem.add(
       MediaItem(
         id: currentSong.id,
-        title: getTitle(currentSong),
+        title: lyric ?? getTitle(currentSong),
         artist: getArtist(currentSong),
         album: getAlbum(currentSong),
         artUri: artUri, // file:// URI
@@ -1954,6 +2045,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   void togglePlay() {
+    if (playQueue.isEmpty) return;
+
     if (isPlayingNotifier.value) {
       pause();
     } else {

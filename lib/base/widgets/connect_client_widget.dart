@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:sylvakru/base/app.dart';
+import 'package:sylvakru/base/audio_handler.dart';
 import 'package:sylvakru/base/data/config.dart';
 import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/data/loader.dart';
@@ -179,7 +180,7 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
                           horizontal: 24,
                           vertical: 8,
                         ),
-                        child: Text(l10n.save),
+                        child: Text(l10n.connect),
                       ),
                     ),
                   )
@@ -233,6 +234,7 @@ class _ConnectClientWidgetState extends State<ConnectClientWidget> {
 
     await config.save();
     if (widget.sourceType == sourceType) {
+      audioHandler.clear();
       await Loader.sync();
     } else {
       Directory dir = Directory(

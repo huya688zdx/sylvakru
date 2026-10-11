@@ -1,3 +1,9 @@
+import 'dart:ui';
+
+import 'package:sylvakru/base/app.dart';
+import 'package:sylvakru/l10n/generated/app_localizations.dart';
+import 'package:sylvakru/l10n/generated/app_localizations_en.dart';
+
 String formatDuration(Duration duration, {bool ms = true}) {
   String twoDigits(int n) => n.toString().padLeft(2, "0");
   if (ms) {
@@ -24,4 +30,24 @@ int compareVersion(String a, String b) {
     }
   }
   return 0;
+}
+
+AppLocalizations getAppLocalizations() {
+  if (globalNavigatorKey.currentContext != null) {
+    return AppLocalizations.of(globalNavigatorKey.currentContext!);
+  } else {
+    if (localeNotifier.value != null) {
+      return lookupAppLocalizations(localeNotifier.value!);
+    } else {
+      late AppLocalizations appLocalizations;
+      try {
+        appLocalizations = lookupAppLocalizations(
+          PlatformDispatcher.instance.locale,
+        );
+      } catch (_) {
+        appLocalizations = AppLocalizationsEn();
+      }
+      return appLocalizations;
+    }
+  }
 }

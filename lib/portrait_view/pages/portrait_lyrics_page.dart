@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:sylvakru/base/audio_handler.dart';
+import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/asset_images.dart';
@@ -666,7 +667,7 @@ class _PortraitLyricsPageState extends State<PortraitLyricsPage> {
                         valueListenable: lyricsFontSizeOffsetNotifier,
                         builder: (context, fontSizeOffset, child) {
                           return SizedBox(
-                            width: 40,
+                            width: 50,
                             child: Text(
                               textAlign: .center,
                               fontSizeOffset.toString(),
@@ -687,45 +688,62 @@ class _PortraitLyricsPageState extends State<PortraitLyricsPage> {
                     ],
                   ),
 
-                  Row(
-                    children: [
-                      SizedBox(width: 20),
-                      Text(
-                        l10n.offset,
-                        style: .new(fontWeight: .bold, color: value),
-                      ),
-                      Spacer(),
+                  StatefulBuilder(
+                    builder: (context, thisSetState) {
+                      bool saving = false;
+                      final currentSong = currentSongNotifier.value!;
+                      return Row(
+                        children: [
+                          SizedBox(width: 20),
+                          Text(
+                            l10n.offset,
+                            style: .new(fontWeight: .bold, color: value),
+                          ),
+                          Spacer(),
 
-                      IconButton(
-                        color: value,
-                        onPressed: () {
-                          lyricsTimeOffsetNotifier.value -= 100;
-                        },
-                        icon: ImageIcon(minimizeImage),
-                      ),
-                      ValueListenableBuilder(
-                        valueListenable: lyricsTimeOffsetNotifier,
-                        builder: (context, timeOffset, child) {
-                          return SizedBox(
-                            width: 40,
+                          IconButton(
+                            color: value,
+                            onPressed: () async {
+                              if (saving) {
+                                return;
+                              }
+                              currentSong.lyricsTimeOffset -= 100;
+
+                              saving = true;
+                              await library.updateLyricsTimeOffset(currentSong);
+
+                              thisSetState(() {});
+                            },
+                            icon: ImageIcon(minimizeImage),
+                          ),
+                          SizedBox(
+                            width: 50,
                             child: Text(
                               textAlign: .center,
-                              '${timeOffset / 1000} s',
+                              '${currentSong.lyricsTimeOffset / 1000} s',
                               style: .new(fontWeight: .bold, color: value),
                             ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        color: value,
-                        onPressed: () {
-                          lyricsTimeOffsetNotifier.value += 100;
-                        },
-                        icon: Icon(Icons.add),
-                      ),
+                          ),
+                          IconButton(
+                            color: value,
+                            onPressed: () async {
+                              if (saving) {
+                                return;
+                              }
+                              currentSong.lyricsTimeOffset += 100;
 
-                      SizedBox(width: 20),
-                    ],
+                              saving = true;
+                              await library.updateLyricsTimeOffset(currentSong);
+
+                              thisSetState(() {});
+                            },
+                            icon: Icon(Icons.add),
+                          ),
+
+                          SizedBox(width: 20),
+                        ],
+                      );
+                    },
                   ),
 
                   Row(

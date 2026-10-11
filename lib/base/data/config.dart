@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:home_widget/home_widget.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/services/emby_client.dart';
 import 'package:sylvakru/base/services/feiniu_client.dart';
@@ -76,6 +77,7 @@ class Config {
       if (!isPremiumNotifier.value) {
         viewModeNotifier.value = .normal;
       }
+      await syncWidgetPremium();
     }
 
     file = File("${appSupportDir.path}/config.json");
@@ -182,6 +184,15 @@ class Config {
 
   Future<void> savePremium() async {
     await _trySecureWrite('isPremium', 'true');
+  }
+
+  // Widget sizes beyond the free ones (NowPlaying above systemSmall,
+  // Playlists above systemMedium) read this flag and dim themselves with an
+  // unlock hint, so it must be pushed and re-rendered whenever it changes.
+  Future<void> syncWidgetPremium() async {
+    await HomeWidget.saveWidgetData('isPremium', isPremiumNotifier.value);
+    await HomeWidget.updateWidget(iOSName: 'NowPlayingWidget');
+    await HomeWidget.updateWidget(iOSName: 'PlaylistsWidget');
   }
 
   Future<void> save() async {

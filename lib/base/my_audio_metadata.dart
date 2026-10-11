@@ -28,6 +28,8 @@ class MyAudioMetadata {
   bool cacheExist = false;
   String? cachePath;
 
+  String? lrcPath;
+
   final isFavoriteNotifier = ValueNotifier(false);
   final updateNotifier = ValueNotifier(0);
 
@@ -38,6 +40,8 @@ class MyAudioMetadata {
   late String compareArtist;
   late String compareAlbum;
 
+  int lyricsTimeOffset;
+
   MyAudioMetadata(
     this._audioMetadata, {
     required this.id,
@@ -46,6 +50,7 @@ class MyAudioMetadata {
     this.modified,
     this.playCount = 0,
     this.lastPlayed,
+    this.lyricsTimeOffset = 0,
   }) {
     picture = MyPicture.form(isStreamSource ? coverId ?? id : path!);
 
@@ -53,6 +58,7 @@ class MyAudioMetadata {
     if (sourceType != .local) {
       cachePath = '${getCachesPath(sourceType)}/$md5Hash';
       cacheExist = File(cachePath!).existsSync();
+      lrcPath = '${getLrcPath(sourceType)}/$md5Hash';
     }
 
     compareTitle = PinyinHelper.getPinyinE(getTitle(this));

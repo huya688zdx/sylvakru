@@ -79,10 +79,10 @@ class _SettingsListState extends State<SettingsList> {
                   subtitle: Text(
                     l10n.settingCount(
                       (Platform.isAndroid
-                              ? 15
+                              ? 16
                               : Platform.isIOS
-                              ? 14
-                              : 13) +
+                              ? 15
+                              : 14) +
                           (isNotStreamSource ? 1 : 0),
                     ),
                     style: TextStyle(fontSize: 12),
@@ -140,6 +140,10 @@ class _SettingsListState extends State<SettingsList> {
         if (viewModeNotifier.value != .bigPicture)
           sliverBox(paddingIfNeed(isLandscape, fontListTile(context, l10n))),
 
+        sliverBox(
+          paddingIfNeed(isLandscape, controlCenterLyricsListTile(l10n)),
+        ),
+
         if (Platform.isIOS &&
             !isLandscape &&
             viewModeNotifier.value != .bigPicture)
@@ -160,10 +164,17 @@ class _SettingsListState extends State<SettingsList> {
 
         if (Platform.isAndroid)
           sliverBox(paddingIfNeed(isLandscape, audioOutputListTile(context))),
-        if (Platform.isAndroid && !isTV)
+        if (Platform.isAndroid && !isTV) ...[
           sliverBox(
             paddingIfNeed(isLandscape, immersiveWideLayoutListTile(l10n)),
           ),
+          sliverBox(
+            paddingIfNeed(isLandscape, wideSystemBarListTile(l10n, top: true)),
+          ),
+          sliverBox(
+            paddingIfNeed(isLandscape, wideSystemBarListTile(l10n, top: false)),
+          ),
+        ],
 
         sliverBox(paddingIfNeed(isLandscape, autoPlayOnStartupListTile(l10n))),
 
@@ -507,8 +518,10 @@ class _SettingsListState extends State<SettingsList> {
         if (await showConfirmDialog(context, l10n.clear)) {
           showCenterLoading();
           layersManager.clearDataLayers();
+          audioHandler.clear();
           await library.clearCache();
           await library.clearPicture();
+          await library.clearLrcCache();
           playlistManager.updateNotifier.value++;
           removeCenterLoading();
         }
@@ -579,6 +592,26 @@ class _SettingsListState extends State<SettingsList> {
           ),
         );
       },
+    );
+  }
+
+  Widget controlCenterLyricsListTile(AppLocalizations l10n) {
+    return ListTile(
+      leading: ImageIcon(desktopLyricsImage, size: iconSize),
+      title: Text(l10n.controlCenterLyrics),
+      trailing: SizedBox(
+        width: 50,
+        child: MySwitch(
+          valueNotifier: controlCenterLyricsNotifier,
+          onToggleCallBack: () {
+            setting.save();
+            if (!controlCenterLyricsNotifier.value &&
+                currentSongNotifier.value != null) {
+              audioHandler.updateServiceMediaItem(currentSongNotifier.value!);
+            }
+          },
+        ),
+      ),
     );
   }
 
@@ -875,16 +908,56 @@ class _SettingsListState extends State<SettingsList> {
               valueNotifier: immersiveWideLayoutNotifier,
               onToggleCallBack: () {
                 if (!isTooNarrow(context)) {
-                  applySystemUiMode(
-                    mode: immersiveWideLayoutNotifier.value
-                        ? .immersiveSticky
-                        : .edgeToEdge,
-                  );
+                  applyWideLayoutSystemUiMode();
                 }
                 setting.save();
               },
             );
           },
+        ),
+      ),
+    );
+  }
+
+  // 宽布局关闭沉浸模式时才显示，分别控制顶/底系统条
+  Widget wideSystemBarListTile(AppLocalizations l10n, {required bool top}) {
+    return ValueListenableBuilder(
+      valueListenable: immersiveWideLayoutNotifier,
+      builder: (context, immersive, child) {
+        if (immersive) {
+          return const SizedBox.shrink();
+        }
+        return child!;
+      },
+      child: ListTile(
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 30),
+          child: Icon(
+            top ? Icons.border_top : Icons.border_bottom,
+            size: iconSize,
+            color: iconColor.value,
+          ),
+        ),
+        title: Text(
+          top ? l10n.wideShowTopSystemBar : l10n.wideShowBottomSystemBar,
+        ),
+        trailing: SizedBox(
+          width: 50,
+          child: Builder(
+            builder: (context) {
+              return MySwitch(
+                valueNotifier: top
+                    ? wideShowTopSystemBarNotifier
+                    : wideShowBottomSystemBarNotifier,
+                onToggleCallBack: () {
+                  if (!isTooNarrow(context)) {
+                    applyWideLayoutSystemUiMode();
+                  }
+                  setting.save();
+                },
+              );
+            },
+          ),
         ),
       ),
     );

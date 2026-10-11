@@ -565,6 +565,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Adjust audio levels across different frequencies';
 
   @override
+  String get widgets => 'Home Screen Widgets';
+
+  @override
+  String get widgetsDescription =>
+      'Show Now Playing and your playlists on the Home Screen';
+
+  @override
   String get futurePremium => 'Future Premium Features';
 
   @override
@@ -647,7 +654,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get connected => 'Connected';
 
   @override
-  String get notConnected => 'Not connected';
+  String get notConnected => 'is Not Connected';
 
   @override
   String get running => 'Running';
@@ -1177,6 +1184,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get immersiveWideLayout => 'Immersive for Wide Layout';
 
   @override
+  String get wideShowTopSystemBar => 'Show Top System Bar in Wide Layout';
+
+  @override
+  String get wideShowBottomSystemBar => 'Show Bottom System Bar in Wide Layout';
+
+  @override
   String get menuOnRight => 'Open Menu from Right';
 
   @override
@@ -1194,4 +1207,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get savedSuccessfully => 'Saved successfully';
+
+  @override
+  String get controlCenterLyrics => 'Control Center Lyrics';
+
+  @override
+  String get connect => 'Connect';
 }

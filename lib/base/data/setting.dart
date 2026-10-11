@@ -90,6 +90,14 @@ class Setting {
     immersiveWideLayoutNotifier.value =
         json['immersiveWideLayout'] as bool? ?? true;
 
+    wideShowTopSystemBarNotifier.value =
+        json['wideShowTopSystemBar'] as bool? ??
+        wideShowTopSystemBarNotifier.value;
+
+    wideShowBottomSystemBarNotifier.value =
+        json['wideShowBottomSystemBar'] as bool? ??
+        wideShowBottomSystemBarNotifier.value;
+
     autoPlayOnStartupNotifier.value =
         json['autoPlayOnStartup'] as bool? ?? false;
 
@@ -121,6 +129,10 @@ class Setting {
         json['exitOnClose'] as bool? ?? exitOnCloseNotifier.value;
 
     recursiveScanNotifier.value = json['recursiveScan'] as bool? ?? false;
+
+    controlCenterLyricsNotifier.value =
+        json['controlCenterLyrics'] as bool? ?? false;
+
     // DAC 音量跨来源共享，迁到现有设置文件，避免切来源时载入旧音量。
     if (legacyDeviceVolumes != null) {
       save();
@@ -153,6 +165,8 @@ class Setting {
         'language': localeNotifier.value?.languageCode,
 
         'immersiveWideLayout': immersiveWideLayoutNotifier.value,
+        'wideShowTopSystemBar': wideShowTopSystemBarNotifier.value,
+        'wideShowBottomSystemBar': wideShowBottomSystemBarNotifier.value,
         'autoPlayOnStartup': autoPlayOnStartupNotifier.value,
 
         'fontFamily': fontFamilyNotifier.value,
@@ -164,6 +178,8 @@ class Setting {
         'exitOnClose': exitOnCloseNotifier.value,
 
         'recursiveScan': recursiveScanNotifier.value,
+
+        'controlCenterLyrics': controlCenterLyricsNotifier.value,
       }),
     );
   }

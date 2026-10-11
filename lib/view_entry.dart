@@ -9,8 +9,12 @@ import 'package:sylvakru/base/data/config.dart';
 import 'package:sylvakru/base/data/library.dart';
 import 'package:sylvakru/base/data/loader.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
+import 'package:sylvakru/base/services/emby_client.dart';
+import 'package:sylvakru/base/services/feiniu_client.dart';
 import 'package:sylvakru/base/services/interaction.dart';
 import 'package:sylvakru/base/services/keyboard.dart';
+import 'package:sylvakru/base/services/navidrome_client.dart';
+import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/services/system_ui_service.dart';
 import 'package:sylvakru/base/services/taskbar_service.dart';
 import 'package:sylvakru/base/utils/media_query.dart';
@@ -132,11 +136,7 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
           return MiniView();
         }
         if (viewMode == .bigPicture) {
-          applySystemUiMode(
-            mode: immersiveWideLayoutNotifier.value
-                ? .immersiveSticky
-                : .edgeToEdge,
-          );
+          applyWideLayoutSystemUiMode();
 
           if (immersiveWideLayoutNotifier.value) {
             return BigPictureView();
@@ -154,11 +154,7 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
         }
         // immersiveSticky：上滑临时显示的系统栏是透明浮层、不派发 insets
         // 变化也会自动隐藏，全面屏手势可正常完成；immersive 被唤出后会常驻
-        applySystemUiMode(
-          mode: immersiveWideLayoutNotifier.value
-              ? .immersiveSticky
-              : .edgeToEdge,
-        );
+        applyWideLayoutSystemUiMode();
 
         if (immersiveWideLayoutNotifier.value) {
           return LandscapeView();
@@ -269,6 +265,14 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
                         child: InkWell(
                           mouseCursor: SystemMouseCursors.click,
                           onTap: () async {
+                            if (isStreamSource &&
+                                streamClient == null &&
+                                !await showConfirmDialog(
+                                  context,
+                                  "${getSourceTypeDisplayName(l10n, sourceType)} ${l10n.notConnected}",
+                                )) {
+                              return;
+                            }
                             setState(() {
                               firstLaunch = false;
                             });
@@ -320,6 +324,26 @@ class _ViewEntryState extends State<ViewEntry> with WidgetsBindingObserver {
                 sourceType == .emby ||
                 sourceType == .feiniu;
             isNotStreamSource = !isStreamSource;
+            streamClient = null;
+            if (sourceType == .navidrome && config.navidromeBaseUrl != null) {
+              streamClient = NavidromeClient(
+                baseUrl: config.navidromeBaseUrl!,
+                username: config.navidromeUsername!,
+                password: config.navidromePassword!,
+              );
+            } else if (sourceType == .emby && config.embyBaseUrl != null) {
+              streamClient = EmbyClient(
+                baseUrl: config.embyBaseUrl!,
+                username: config.embyUsername!,
+                password: config.embyPassword!,
+              );
+            } else if (sourceType == .feiniu && config.feiniuBaseUrl != null) {
+              streamClient = FeiniuClient(
+                baseUrl: config.feiniuBaseUrl!,
+                username: config.feiniuUsername!,
+                password: config.feiniuPassword!,
+              );
+            }
             library = Library();
             if (isNotStreamSource) {
               await library.initFolders();

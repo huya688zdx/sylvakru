@@ -145,9 +145,6 @@ Widget playOrPauseButton(double size, {Color? iconColor}) {
       },
     ),
     onPressed: () {
-      if (playQueue.isEmpty) {
-        return;
-      }
       audioHandler.togglePlay();
     },
   );

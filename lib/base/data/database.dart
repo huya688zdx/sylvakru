@@ -40,6 +40,8 @@ class MetadataItems extends Table {
 
   IntColumn get lastPlayed => integer().nullable()();
 
+  IntColumn get lyricsTimeOffset => integer().withDefault(const Constant(0))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -81,6 +83,10 @@ class MetadataDB extends _$MetadataDB {
           if (columns.contains('source_type')) {
             await m.dropColumn(metadataItems, 'source_type');
           }
+        }
+
+        if (from < 5) {
+          await m.addColumn(metadataItems, metadataItems.lyricsTimeOffset);
         }
       },
     );

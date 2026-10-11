@@ -119,10 +119,9 @@ Future<bool> showConfirmDialog(BuildContext context, String action) async {
                       child: Text(
                         action,
                         style: TextStyle(
-                          fontSize: 24,
+                          fontSize: 20,
                           fontWeight: .bold,
                           color: colorManager.getSpecificTextColor(),
-                          overflow: .ellipsis,
                         ),
                       ),
                     ),

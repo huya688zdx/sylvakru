@@ -14,6 +14,10 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+dependencies {
+    implementation("androidx.media:media:1.7.0")
+}
+
 android {
     namespace = "com.afalphy.sylvakru"
     compileSdk = 37
@@ -75,7 +79,7 @@ android {
             force("androidx.fragment:fragment:1.6.2")
         }
     }
-    
+
 }
 
 kotlin {

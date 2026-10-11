@@ -228,6 +228,8 @@
   "themeDescription": "Unlock Vivid Mode for the Main Page",
   "fontDescription": "Use custom fonts",
   "equalizerDescription": "Adjust audio levels across different frequencies",
+  "widgets": "Home Screen Widgets",
+  "widgetsDescription": "Show Now Playing and your playlists on the Home Screen",
   "futurePremium": "Future Premium Features",
   "futurePremiumDescription": "All future premium features will be unlocked automatically",
   "premiumRequiredMessage": "This feature requires Premium Features to be unlocked before it can be used",
@@ -473,10 +475,15 @@
   "offset": "Offset",
   "getStart": "Get Start",
   "immersiveWideLayout": "Immersive for Wide Layout",
+  "wideShowTopSystemBar": "Show Top System Bar in Wide Layout",
+  "wideShowBottomSystemBar": "Show Bottom System Bar in Wide Layout",
   "menuOnRight": "Open Menu from Right",
   "save": "Save",
   "chooseMusicSource": "Choose a Music Source",
   "feiniuMusic": "Feiniu Music",
   "feiniuConnectionFailed": "Unable to connect to Feiniu Music. Check the server URL and your music app username and password.",
-  "savedSuccessfully": "Saved successfully"
+  "savedSuccessfully": "Saved successfully",
+  "controlCenterLyrics": "Control Center Lyrics",
+  "connect": "Connect",
+  "notConnected": "is Not Connected"
 }

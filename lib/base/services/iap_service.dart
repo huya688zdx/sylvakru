@@ -112,6 +112,7 @@ class IAPService {
     await config.savePremium();
     isPremiumNotifier.value = true;
     trialRemainingMinNotifier.value = -1;
+    await config.syncWidgetPremium();
   }
 
   void _showPendingUI() => onMessage?.call(l10n.pendingPurchase);

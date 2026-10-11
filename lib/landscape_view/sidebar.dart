@@ -62,15 +62,16 @@ class Sidebar extends StatelessWidget {
                 leading,
                 SizedBox(width: 10),
 
-                Text(
-                  content,
-                  style: TextStyle(
-                    fontSize: 15,
-                    overflow: TextOverflow.ellipsis,
+                Expanded(
+                  child: Text(
+                    content,
+                    style: TextStyle(
+                      fontSize: 15,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
 
-                Spacer(),
                 if (trailing != null) ...[trailing, SizedBox(width: 5)],
               ],
             ),

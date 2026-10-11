@@ -563,6 +563,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get equalizerDescription => '可调节不同频段的音量';
 
   @override
+  String get widgets => '桌面小组件';
+
+  @override
+  String get widgetsDescription => '在主屏幕展示正在播放与你的歌单';
+
+  @override
   String get futurePremium => '未来高级功能';
 
   @override
@@ -1150,6 +1156,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get immersiveWideLayout => '宽布局启用沉浸模式';
 
   @override
+  String get wideShowTopSystemBar => '宽布局显示顶部系统条';
+
+  @override
+  String get wideShowBottomSystemBar => '宽布局显示底部系统条';
+
+  @override
   String get menuOnRight => '从右侧弹出菜单';
 
   @override
@@ -1166,4 +1178,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get savedSuccessfully => '保存成功';
+
+  @override
+  String get controlCenterLyrics => '控制中心歌词';
+
+  @override
+  String get connect => '连接';
 }

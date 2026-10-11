@@ -68,11 +68,11 @@ class Loader {
 
     await audioHandler.loadStates();
 
+    artistAlbumManager.classify();
+
     await history.load();
 
     await playlistManager.load();
-
-    artistAlbumManager.classify();
 
     _busy = false;
     stateNotifier.value++;
@@ -117,11 +117,11 @@ class Loader {
 
     await audioHandler.sync();
 
+    artistAlbumManager.classify();
+
     await history.load();
 
     await playlistManager.sync();
-
-    artistAlbumManager.classify();
 
     if (isStreamSource) {
       File syncedFile = File(getSyncedFilePath(sourceType));
@@ -153,11 +153,11 @@ class Loader {
 
     await audioHandler.loadStates();
 
+    artistAlbumManager.classify();
+
     await history.load();
 
     await playlistManager.sync();
-
-    artistAlbumManager.classify();
 
     if (isStreamSource) {
       File syncedFile = File(getSyncedFilePath(sourceType));

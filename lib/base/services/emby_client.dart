@@ -400,34 +400,6 @@ class EmbyClient extends StreamClient {
 
   @override
   Future<String> getLyricsById(String songId) async {
-    final response = await safeRequest<Map<String, dynamic>>(
-      () => dio.get('/Audio/$songId/RemoteSearch/Lyrics'),
-      parser: (res) => res.data as Map<String, dynamic>?,
-    );
-
-    if (response == null) {
-      return '';
-    }
-
-    final lyricsData = response['Lyrics'];
-
-    if (lyricsData is List) {
-      final buffer = StringBuffer();
-      for (final line in lyricsData) {
-        final startTicks = line['Start'] ?? 0;
-        final value = line['Text'] ?? '';
-
-        final totalMs = (startTicks / 10000).round();
-
-        final minute = (totalMs ~/ 60000).toString().padLeft(2, '0');
-        final second = ((totalMs % 60000) ~/ 1000).toString().padLeft(2, '0');
-        final milli = (totalMs % 1000).toString().padLeft(3, '0');
-
-        buffer.writeln('[$minute:$second.$milli]$value');
-      }
-      return buffer.toString();
-    }
-
     return '';
   }
 

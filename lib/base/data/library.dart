@@ -198,7 +198,7 @@ class Library {
     }
     int total = 0;
     await for (final file in cacheDir.list()) {
-      if (file is File) {
+      if (file is File && !file.path.endsWith('.part')) {
         total += await file.length();
       }
     }
@@ -416,11 +416,7 @@ class Library {
     await cancelDownloads();
     Directory cacheDir = Directory(getCachesPath(sourceType));
     if (await cacheDir.exists()) {
-      await for (final file in cacheDir.list()) {
-        if (file is File) {
-          await file.delete();
-        }
-      }
+      await cacheDir.delete(recursive: true);
     }
 
     cacheSizeNotifier.value = 0;
@@ -433,9 +429,7 @@ class Library {
   Future<void> clearPicture() async {
     Directory pictureDir = Directory(getPicturesPath(sourceType));
     if (await pictureDir.exists()) {
-      await for (final file in pictureDir.list()) {
-        await file.delete();
-      }
+      await pictureDir.delete(recursive: true);
     }
     pictureLoadScheduler.clear();
     for (final picture in globalPictureList) {
@@ -445,6 +439,16 @@ class Library {
     final imageCache = PaintingBinding.instance.imageCache;
     imageCache.clear();
     imageCache.clearLiveImages();
+  }
+
+  Future<void> clearLrcCache() async {
+    Directory cacheDir = Directory(getLrcPath(sourceType));
+    if (await cacheDir.exists()) {
+      await cacheDir.delete(recursive: true);
+    }
+    for (final song in library.id2Song.values) {
+      song.parsedLyrics = null;
+    }
   }
 
   Future<void> _saveMetadata() async {
@@ -493,16 +497,13 @@ class Library {
     );
   }
 
-  Future<void> updateDuration(MyAudioMetadata song, Duration duration) async {
-    final db = _metadataDB;
-    if (db == null) return;
+  Future<void> updateLyricsTimeOffset(MyAudioMetadata song) async {
+    final db = _metadataDB!;
     await (db.update(
       db.metadataItems,
     )..where((t) => t.id.equals(song.id))).write(
-      MetadataItemsCompanion(duration: Value(duration.inMilliseconds)),
+      MetadataItemsCompanion(lyricsTimeOffset: Value(song.lyricsTimeOffset)),
     );
-    song.duration = duration;
-    song.updateNotifier.value++;
   }
 
   Future<void> updateMetadata(MyAudioMetadata song) async {

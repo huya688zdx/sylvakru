@@ -120,6 +120,10 @@ String getPicturesPath(SourceType sourceType) {
   return '${appSupportDir.path}/${sourceType.name}/pictures';
 }
 
+String getLrcPath(SourceType sourceType) {
+  return '${appSupportDir.path}/${sourceType.name}/lyrics';
+}
+
 String getSyncedFilePath(SourceType sourceType) {
   return '${appSupportDir.path}/${sourceType.name}/synced.keep';
 }

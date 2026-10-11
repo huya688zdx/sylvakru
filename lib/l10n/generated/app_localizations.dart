@@ -1178,6 +1178,18 @@ abstract class AppLocalizations {
   /// **'Adjust audio levels across different frequencies'**
   String get equalizerDescription;
 
+  /// No description provided for @widgets.
+  ///
+  /// In en, this message translates to:
+  /// **'Home Screen Widgets'**
+  String get widgets;
+
+  /// No description provided for @widgetsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Now Playing and your playlists on the Home Screen'**
+  String get widgetsDescription;
+
   /// No description provided for @futurePremium.
   ///
   /// In en, this message translates to:
@@ -1331,7 +1343,7 @@ abstract class AppLocalizations {
   /// No description provided for @notConnected.
   ///
   /// In en, this message translates to:
-  /// **'Not connected'**
+  /// **'is Not Connected'**
   String get notConnected;
 
   /// No description provided for @running.
@@ -2294,6 +2306,18 @@ abstract class AppLocalizations {
   /// **'Immersive for Wide Layout'**
   String get immersiveWideLayout;
 
+  /// No description provided for @wideShowTopSystemBar.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Top System Bar in Wide Layout'**
+  String get wideShowTopSystemBar;
+
+  /// No description provided for @wideShowBottomSystemBar.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Bottom System Bar in Wide Layout'**
+  String get wideShowBottomSystemBar;
+
   /// No description provided for @menuOnRight.
   ///
   /// In en, this message translates to:
@@ -2329,6 +2353,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Saved successfully'**
   String get savedSuccessfully;
+
+  /// No description provided for @controlCenterLyrics.
+  ///
+  /// In en, this message translates to:
+  /// **'Control Center Lyrics'**
+  String get controlCenterLyrics;
+
+  /// No description provided for @connect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get connect;
 }
 
 class _AppLocalizationsDelegate

@@ -22,7 +22,7 @@ void keyboardInit() {
           ctrlIsPressed = true;
           break;
         case LogicalKeyboardKey.space:
-          if (!isTyping && playQueue.isNotEmpty) {
+          if (!isTyping) {
             audioHandler.togglePlay();
           }
           break;

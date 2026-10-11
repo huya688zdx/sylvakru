@@ -91,3 +91,4 @@ const AssetImage topArrowImage = AssetImage('assets/images/top_arrow.png');
 const AssetImage unmaximizeImage = AssetImage('assets/images/unmaximize.png');
 const AssetImage vibrationImage = AssetImage('assets/images/vibration.png');
 const AssetImage webdavImage = AssetImage('assets/images/webdav.png');
+const AssetImage widgetImage = AssetImage('assets/images/widget.png');

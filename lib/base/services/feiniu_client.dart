@@ -128,8 +128,7 @@ class FeiniuClient extends StreamClient {
       if (body is Map && body['code'] == 0) {
         return Map<String, dynamic>.from(body);
       }
-      expired =
-          body is Map && (body['code'] == 99999 || body['code'] == 120001);
+      expired = body is Map && body['code'] == 99999;
       if (!expired) {
         logger.output(
           '[$runtimeType] Request rejected: $path (${body is Map ? body['code'] : 'invalid response'})',
@@ -454,9 +453,7 @@ class FeiniuClient extends StreamClient {
     if (contentType.contains('json')) {
       final text = await utf8.decoder.bind(body.stream).join();
       final json = jsonDecode(text);
-      expired =
-          expired ||
-          (json is Map && (json['code'] == 99999 || json['code'] == 120001));
+      expired = expired || (json is Map && json['code'] == 99999);
     } else if (!expired &&
         (response.statusCode == 200 || response.statusCode == 206) &&
         (contentType.startsWith(

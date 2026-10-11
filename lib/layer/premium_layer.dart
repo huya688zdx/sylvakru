@@ -216,6 +216,12 @@ class _PremiumLayerState extends State<PremiumLayer> {
                 const SizedBox(height: 12),
 
                 FeatureCard(
+                  icon: ImageIcon(widgetImage, size: 30),
+                  title: l10n.widgets,
+                  description: l10n.widgetsDescription,
+                ),
+
+                FeatureCard(
                   icon: ImageIcon(themeImage, size: 30),
                   title: l10n.theme,
                   description: l10n.themeDescription,
