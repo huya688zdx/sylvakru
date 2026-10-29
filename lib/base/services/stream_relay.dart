@@ -108,9 +108,10 @@ class StreamRelay {
         return;
       }
 
-      await for (final chunk in response) {
-        request.response.add(chunk);
-      }
+      // add() 只同步排队写入，上游下载远快于 mpv 消费时会把剩余文件整个
+      // 缓冲进堆内存；addStream 等待下游消化形成背压，下游断开（seek/切歌）
+      // 时写入失败并同步取消上游连接。
+      await request.response.addStream(response);
       await request.response.close();
     } catch (e) {
       // mpv aborts requests mid-stream when seeking or switching tracks;
