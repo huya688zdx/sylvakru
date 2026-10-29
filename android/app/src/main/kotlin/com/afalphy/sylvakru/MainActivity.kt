@@ -13,6 +13,7 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioMixerAttributes
 import android.media.AudioTrack
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -135,6 +136,36 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
             }
 
         ensureSuperLyricPublisherRegistered()
+
+        // Reports the system HTTP proxy (Wi-Fi/global proxy); Dart reads it via
+        // the com.afalphy.system_proxy channel to route Dio and libmpv. VPN-mode
+        // (TUN) proxies capture traffic transparently without a proxy config,
+        // so this returns null then.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.afalphy.system_proxy").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getProxy" -> result.success(getSystemProxy())
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun getSystemProxy(): String? {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val info = (getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager)?.defaultProxy
+                if (info != null && !info.host.isNullOrEmpty() && info.port != 0) {
+                    return "http://${info.host}:${info.port}"
+                }
+            }
+
+            val host = System.getProperty("http.proxyHost")
+            val port = System.getProperty("http.proxyPort")?.toIntOrNull()
+            if (!host.isNullOrEmpty() && port != null && port != 0) {
+                return "http://$host:$port"
+            }
+        } catch (_: Exception) {
+        }
+        return null
     }
 
     // 独占播放的音量由应用接管，仅在 Activity 前台拦截手机物理音量键；
