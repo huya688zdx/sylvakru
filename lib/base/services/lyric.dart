@@ -169,22 +169,45 @@ String _elementText(XmlElement element) {
 List<LyricToken> _collectTimedTokens(XmlElement node) {
   final tokens = <LyricToken>[];
 
-  for (final child in node.children.whereType<XmlElement>()) {
+  // span 之间的裸文本（空格、标点、未计时文字）先攒着，并入下一个 token
+  // 的开头或行尾最后一个 token 的结尾：karaoke 渲染只按 tokens 拼接显示，
+  // 丢掉它们会让显示文本与整行不一致（如 "Hello world" 变 "Helloworld"）。
+  var pendingText = '';
+
+  for (final child in node.children) {
+    if (child is XmlText) {
+      pendingText += child.value;
+      continue;
+    }
+    if (child is! XmlElement) {
+      continue;
+    }
     if (child.name.local == 'br') {
+      pendingText += ' ';
       continue;
     }
     final beginAttr = child.getAttribute('begin');
     if (child.name.local == 'span' && beginAttr != null) {
       final begin = parseTtmlTime(beginAttr);
       if (begin == null) {
+        pendingText += _elementText(child);
         continue;
       }
       final nested = _collectTimedTokens(child);
       if (nested.isNotEmpty) {
+        if (pendingText.isNotEmpty) {
+          final first = nested.first;
+          nested[0] = LyricToken(
+            first.start,
+            _normalizeWhitespace(pendingText + first.text),
+            first.end,
+          );
+          pendingText = '';
+        }
         tokens.addAll(nested);
         continue;
       }
-      final text = _normalizeWhitespace(_elementText(child));
+      final text = _normalizeWhitespace(pendingText + _elementText(child));
       if (text.trim().isEmpty) {
         continue;
       }
@@ -196,9 +219,35 @@ List<LyricToken> _collectTimedTokens(XmlElement node) {
           endAttr != null ? parseTtmlTime(endAttr) : null,
         ),
       );
+      pendingText = '';
     } else {
-      tokens.addAll(_collectTimedTokens(child));
+      final nested = _collectTimedTokens(child);
+      if (nested.isNotEmpty) {
+        if (pendingText.isNotEmpty) {
+          final first = nested.first;
+          nested[0] = LyricToken(
+            first.start,
+            _normalizeWhitespace(pendingText + first.text),
+            first.end,
+          );
+          pendingText = '';
+        }
+        tokens.addAll(nested);
+      } else {
+        pendingText += _elementText(child);
+      }
     }
+  }
+
+  if (pendingText.isNotEmpty && tokens.isNotEmpty) {
+    final last = tokens.removeLast();
+    tokens.add(
+      LyricToken(
+        last.start,
+        _normalizeWhitespace(last.text + pendingText),
+        last.end,
+      ),
+    );
   }
 
   return tokens;
@@ -209,6 +258,10 @@ Future<void> setParsedLyrics(MyAudioMetadata song) async {
     return;
   }
   ParsedLyrics result = ParsedLyrics();
+  // load 不等待本函数：在首个 await 前先挂上占位对象，避免 sidecar 查找等
+  // 异步路径挂起期间 parsedLyrics 仍为 null 被调用方解引用（旧实现本地无
+  // sidecar 的路径同步完成，不存在这个窗口）。
+  song.parsedLyrics = result;
 
   String lyrics = '';
 
@@ -252,8 +305,6 @@ Future<void> setParsedLyrics(MyAudioMetadata song) async {
       songDuration: song.duration,
     );
   }
-
-  song.parsedLyrics = result;
 }
 
 /// Reads the lyric sidecar for a local/WebDAV song, trying `.lrc`, `.ttml`
@@ -287,6 +338,14 @@ Future<String> _readSidecarLyrics(MyAudioMetadata song) async {
     final lyrics = await _readFileWithEncodingFallback(file);
     if (lyrics.trim().isNotEmpty) {
       return lyrics;
+    }
+    // 空 sidecar 视为未命中：WebDAV 的三个扩展名复用同一个 .lrc 缓存文件，
+    // 留着空文件会让后续扩展名跳过下载、永远读回同一段空内容。本地文件是
+    // 用户自己的 sidecar，不能删。
+    if (sourceType == .webdav) {
+      try {
+        await file.delete();
+      } catch (_) {}
     }
   }
 
