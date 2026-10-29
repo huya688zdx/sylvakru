@@ -12,6 +12,7 @@ import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/data/database.dart';
 import 'package:sylvakru/base/extensions/metadata_extension.dart';
 import 'package:sylvakru/base/services/feiniu_client.dart';
+import 'package:sylvakru/base/services/background_task_service.dart';
 import 'package:sylvakru/base/services/logger.dart';
 import 'package:sylvakru/base/services/picture_load_scheduler.dart';
 import 'package:sylvakru/base/services/picture_service.dart';
@@ -334,40 +335,47 @@ class Library {
     if (await stale.exists()) {
       await stale.delete();
     }
-    while (!cancelToken.isCancelled) {
-      // 重试时从 .part 已有长度断点续传，不从头重下：正在流式独占读这个
-      // .part 的引擎不必等重新下载追回播放位置，已下载流量也不浪费
-      final resumeFrom = (await File(partPath).exists())
-          ? await File(partPath).length()
-          : 0;
-      final completed = switch (downloadSource) {
-        .webdav => await webdav!.download(
-          remotePath: song.path!,
-          localPath: partPath,
-          cancelToken: cancelToken,
-          resumeFrom: resumeFrom,
-        ),
-        .navidrome || .emby || .feiniu => await client!.downloadSong(
-          song.id,
-          partPath,
-          cancelToken: cancelToken,
-          resumeFrom: resumeFrom,
-        ),
-        .local => false,
-      };
-      final part = File(partPath);
-      if (completed && await part.exists()) {
-        await part.rename(savePath);
-        song.cacheExist = true;
-        cacheSizeNotifier.value +=
-            await File(savePath).length() / (1024 * 1024);
-        await _supplementCachedReplayGain(song, savePath);
-        return;
+    // iOS only: request background execution time so the download is not
+    // suspended halfway when the app is backgrounded.
+    final backgroundTask = await BackgroundTaskService.begin();
+    try {
+      while (!cancelToken.isCancelled) {
+        // 重试时从 .part 已有长度断点续传，不从头重下：正在流式独占读这个
+        // .part 的引擎不必等重新下载追回播放位置，已下载流量也不浪费
+        final resumeFrom = (await File(partPath).exists())
+            ? await File(partPath).length()
+            : 0;
+        final completed = switch (downloadSource) {
+          .webdav => await webdav!.download(
+            remotePath: song.path!,
+            localPath: partPath,
+            cancelToken: cancelToken,
+            resumeFrom: resumeFrom,
+          ),
+          .navidrome || .emby || .feiniu => await client!.downloadSong(
+            song.id,
+            partPath,
+            cancelToken: cancelToken,
+            resumeFrom: resumeFrom,
+          ),
+          .local => false,
+        };
+        final part = File(partPath);
+        if (completed && await part.exists()) {
+          await part.rename(savePath);
+          song.cacheExist = true;
+          cacheSizeNotifier.value +=
+              await File(savePath).length() / (1024 * 1024);
+          await _supplementCachedReplayGain(song, savePath);
+          return;
+        }
+        if (!cancelToken.isCancelled) {
+          logger.output('cache download retry:${song.title}');
+          await Future.delayed(const Duration(seconds: 1));
+        }
       }
-      if (!cancelToken.isCancelled) {
-        logger.output('cache download retry:${song.title}');
-        await Future.delayed(const Duration(seconds: 1));
-      }
+    } finally {
+      await BackgroundTaskService.end(backgroundTask);
     }
   }
 

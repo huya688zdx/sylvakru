@@ -10,6 +10,7 @@ import 'package:liquid_glass_widgets/liquid_glass_setup.dart';
 import 'package:sylvakru/base/services/color_manager.dart';
 import 'package:sylvakru/base/app.dart';
 import 'package:sylvakru/base/services/logger.dart';
+import 'package:sylvakru/base/services/proxy_service.dart';
 import 'package:sylvakru/base/services/keyboard.dart';
 import 'package:sylvakru/base/services/my_tray_listener.dart';
 import 'package:sylvakru/base/services/my_window_listener.dart';
@@ -56,7 +57,13 @@ Future<void> main() async {
   await logger.init();
 
   if (isMobile) {
-    screenRadius = await CornerRadiusPlugin.init();
+    final screenRadius = await CornerRadiusPlugin.init();
+    screenTopLeftRadius = screenRadius.topLeft;
+    screenTopRightRadius = screenRadius.topRight;
+    CornerRadiusPlugin.screenRadiusStream.listen((radius) {
+      screenTopLeftRadius = radius.topLeft;
+      screenTopRightRadius = radius.topRight;
+    });
     await HomeWidget.setAppGroupId('group.com.afalphy.sylvakru');
   } else {
     if (kReleaseMode) {
@@ -70,6 +77,8 @@ Future<void> main() async {
   }
 
   _registerLicenses();
+
+  await initSystemProxy();
 
   await initAudioService();
 

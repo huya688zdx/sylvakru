@@ -9,11 +9,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:sylvakru/base/data/loader.dart';
 import 'package:sylvakru/base/data/playlist.dart';
 import 'package:sylvakru/base/data/setting.dart';
+import 'package:sylvakru/base/services/background_task_service.dart';
 import 'package:sylvakru/base/services/home_widget_service.dart';
 import 'package:sylvakru/base/services/my_window_listener.dart';
 import 'package:sylvakru/base/services/picture_service.dart';
 import 'package:sylvakru/base/services/play_queue_logic.dart';
 import 'package:sylvakru/base/services/super_lyric.dart';
+import 'package:sylvakru/base/services/stream_relay.dart';
 import 'package:sylvakru/base/services/stream_client.dart';
 import 'package:sylvakru/base/services/feiniu_client.dart';
 import 'package:sylvakru/base/services/taskbar_service.dart';
@@ -157,6 +159,8 @@ Future<void> initAudioService() async {
     );
     if (event.begin && !audioHandler._usbExclusiveActive) {
       audioHandler.pause();
+    } else {
+      audioHandler.play();
     }
   });
 
@@ -167,11 +171,15 @@ Future<void> initAudioService() async {
       switch (call.method) {
         case 'toggleFavorite':
           if (currentSongNotifier.value != null) {
+            // iOS only: hold background runtime so the command is not cut off
+            // when the widget tap woke the app in the background.
+            await audioHandler.beginWidgetCommandGrace();
             toggleFavoriteState(currentSongNotifier.value!);
           }
         case 'skipToPrevious':
           audioHandler.skipToPrevious();
         case 'togglePlay':
+          await audioHandler.beginWidgetCommandGrace();
           audioHandler.togglePlay();
         case 'skipToNext':
           audioHandler.skipToNext();
@@ -224,10 +232,29 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   String? _sharedPlaybackError;
   bool _sharedPlaybackOpenFailed = false;
 
+  // iOS background-execution grace for the current load (see _beginLoadGrace).
+  StreamSubscription<bool>? _loadGraceSub;
+  int? _loadGraceToken;
+  bool _loadGraceSawBuffering = false;
+
+  // iOS background-execution grace for widget-button commands.
+  int? _widgetCommandToken;
+  Timer? _widgetCommandTimer;
+  StreamSubscription<Duration>? _widgetCommandSub;
+
+  // iOS background-execution grace held while mpv is buffering, including
+  // mid-song stalls on weak network.
+  int? _stallGraceToken;
+  bool _stallGraceArming = false;
+
   MyAudioHandler() {
     _publishAndroidPlaybackInfo();
     // avoid reading .lrc files
     (_player.platform as NativePlayer).setProperty('sub-auto', 'no');
+
+    if (Platform.isIOS) {
+      (_player.platform as NativePlayer).setProperty('audio-exclusive', 'yes');
+    }
 
     _player.stream.error.listen((onData) {
       _sharedPlaybackError = onData;
@@ -248,8 +275,6 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
           return;
         }
 
-        bool needPauseTmp = needPause;
-
         if (Loader.busy) {
           await pause();
           return;
@@ -260,15 +285,10 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         } else {
           await skipToNext(); // automatically go to next song
         }
-
-        if (needPauseTmp) {
-          await pause();
-        }
       }
     });
 
     currentSongNotifier.addListener(() {
-      needPause = false;
       if (viewModeNotifier.value == .bigPicture) {
         if (useCurrentSongForBg) {
           colorManager.updateBigPictureRelatedColors(
@@ -329,6 +349,18 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     if (Platform.isAndroid) {
       WidgetsBinding.instance.addObserver(this);
     }
+
+    // iOS: hold a background task for the whole buffering phase (including
+    // mid-song stalls on weak network) so the process is not suspended before
+    // buffering completes. core-idle also reports true on stop/pause, so only
+    // arm while a song is actually playing or loading.
+    _player.stream.buffering.listen((buffering) {
+      if (buffering) {
+        _beginStallGrace();
+      } else {
+        _endStallGrace();
+      }
+    });
   }
 
   void _handleReplayGainMetadataChanged() {
@@ -511,7 +543,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
   }
 
-  void updateIsPlaying(bool isPlaying) async {
+  Future<void> updateIsPlaying(bool isPlaying) async {
     if (isPlaying) {
       _playLastSyncTime = DateTime.now();
     } else if (_playLastSyncTime != null) {
@@ -525,7 +557,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         setupTaskbar();
       }
     } else if (Platform.isIOS) {
-      HomeWidgetService.updateIsPlaying();
+      await HomeWidgetService.updateIsPlaying();
     }
   }
 
@@ -760,6 +792,28 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
         break;
     }
     resource ??= currentSong.path!;
+    // libmpv's bundled ffmpeg does TLS with macOS Secure Transport, which
+    // cannot negotiate TLS 1.3 - servers requiring it kill the handshake
+    // regardless of any proxy setting. Dart's HttpClient handles TLS 1.3
+    // and the system proxy, so remote streams are re-served to mpv over
+    // plain localhost HTTP (see StreamRelay).
+    final remoteUri = Uri.tryParse(resource);
+    final isRemoteStream =
+        remoteUri != null &&
+        (remoteUri.scheme == 'https' || remoteUri.scheme == 'http') &&
+        remoteUri.host != '127.0.0.1' &&
+        remoteUri.host != 'localhost' &&
+        remoteUri.host != '::1';
+    if (isRemoteStream) {
+      resource = await streamRelay.register(
+        resource,
+        isStreamSource
+            ? streamClient?.headers
+            : needHeader
+            ? webdavClient?.headers
+            : null,
+      );
+    }
     resource = await usbAudioService.prepareSharedFlacPlayback(
       playerHandle: await _player.handle,
       path: resource,
@@ -769,7 +823,9 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     await _player.open(
       Media(
         resource,
-        httpHeaders: isStreamSource
+        httpHeaders: isRemoteStream
+            ? null
+            : isStreamSource
             ? streamClient?.headers
             : needHeader
             ? webdavClient?.headers
@@ -1210,6 +1266,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   }
 
   Future<void> justClear() async {
+    _endLoadGrace();
+    _endStallGrace();
     library.replayGainMetadataChangedNotifier.removeListener(
       _handleReplayGainMetadataChanged,
     );
@@ -1299,7 +1357,86 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
   }
 
+  // iOS: keeps the app running while a song loads in the background. The
+  // grace ends when buffering settles after MPV_EVENT_START_FILE; the player
+  // reset before that event also emits buffering=false, so only a false
+  // following a true counts as loaded.
+  Future<void> _beginLoadGrace() async {
+    await _endLoadGrace();
+    _loadGraceToken = await BackgroundTaskService.begin();
+    if (_loadGraceToken == null) {
+      return;
+    }
+    _loadGraceSawBuffering = false;
+    _loadGraceSub = _player.stream.buffering.listen((buffering) async {
+      if (buffering) {
+        _loadGraceSawBuffering = true;
+      } else if (_loadGraceSawBuffering) {
+        if (needPause) {
+          // ensure widget is updated
+          await Future.delayed(Duration(milliseconds: 500));
+          await pause();
+        }
+        _endLoadGrace();
+      }
+    });
+  }
+
+  Future<void> _endLoadGrace() async {
+    _loadGraceSub?.cancel();
+    _loadGraceSub = null;
+    final token = _loadGraceToken;
+    _loadGraceToken = null;
+    await BackgroundTaskService.end(token);
+  }
+
+  // iOS: a widget tap wakes the app in the background with only a few seconds
+  // of runtime, which can suspend it before playback becomes audible (Dart
+  // ran, but no sound). Holds a background task until the first position tick
+  // (audio flowing) or the timeout, whichever comes first.
+  Future<void> beginWidgetCommandGrace() async {
+    await endWidgetCommandGrace();
+    _widgetCommandToken = await BackgroundTaskService.begin();
+    if (_widgetCommandToken == null) {
+      return;
+    }
+
+    _widgetCommandTimer = Timer(Duration(seconds: 15), endWidgetCommandGrace);
+  }
+
+  Future<void> endWidgetCommandGrace() async {
+    _widgetCommandSub?.cancel();
+    _widgetCommandSub = null;
+    _widgetCommandTimer?.cancel();
+    _widgetCommandTimer = null;
+    final token = _widgetCommandToken;
+    _widgetCommandToken = null;
+    await BackgroundTaskService.end(token);
+  }
+
+  Future<void> _beginStallGrace() async {
+    if (!Platform.isIOS || _stallGraceArming || _stallGraceToken != null) {
+      return;
+    }
+    if (!loadingSong && !isPlayingNotifier.value) {
+      return;
+    }
+    _stallGraceArming = true;
+    _stallGraceToken = await BackgroundTaskService.begin();
+    _stallGraceArming = false;
+  }
+
+  Future<void> _endStallGrace() async {
+    final token = _stallGraceToken;
+    _stallGraceToken = null;
+    await BackgroundTaskService.end(token);
+  }
+
   Future<void> load({Duration? start}) async {
+    // iOS only: request background execution time for the lyrics fetch,
+    // stream ping, player open and buffering below.
+    await _beginLoadGrace();
+
     _cancelVolumeRamp();
     _cancelOutputGainRamp();
     final generation = ++_loadGeneration;
@@ -1367,6 +1504,12 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     isLoading = true;
     final replacingUsbExclusive = _usbExclusiveActive;
     currentLyricsIndexNotifier.value = -1;
+
+    if (Platform.isIOS) {
+      await HomeWidgetService.updateNowPlayingWidget();
+      // update colors
+      await HomeWidgetService.reloadPlaylistsWidget();
+    }
 
     try {
       if (!replacingUsbExclusive) {
@@ -1446,12 +1589,6 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     if (start == null) _positionState.writeAsString('0');
 
     loadingSong = false;
-
-    if (Platform.isIOS) {
-      HomeWidgetService.updateNowPlayingWidget();
-      // update colors
-      HomeWidgetService.reloadPlaylistsWidget();
-    }
   }
 
   /// 独占模式连播优化：当前曲开播后预下载队列下一首云端歌曲，
@@ -1936,7 +2073,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     }
 
     final currentSong = playQueue[currentIndex];
-    updateIsPlaying(true);
+    await updateIsPlaying(true);
     final openedExclusive = await _tryOpenUsbExclusive(currentSong);
     if (openedExclusive) {
       await _stopPlayerForUsbExclusive();
@@ -1977,7 +2114,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     _player.pause();
     unawaited(_superLyric.sendStop());
     _superLyric.reset();
-    updateIsPlaying(false);
+    await updateIsPlaying(false);
     updatePlaybackState();
     _positionTimer?.cancel();
     _positionTimer = null;
@@ -1987,6 +2124,8 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
   @override
   Future<void> stop() async {
     isLoading = false;
+    await _endLoadGrace();
+    await _endStallGrace();
     _cancelVolumeRamp();
     _cancelOutputGainRamp();
     if (_usbExclusiveActive) {
@@ -1998,7 +2137,7 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
     _player.stop();
     unawaited(_superLyric.sendStop());
     _superLyric.reset();
-    updateIsPlaying(false);
+    await updateIsPlaying(false);
     updatePlaybackState(stop: true);
     _positionTimer?.cancel();
     _positionTimer = null;

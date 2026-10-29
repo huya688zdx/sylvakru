@@ -12,6 +12,8 @@ class EmbyClient extends StreamClient {
   String? accessToken;
   String? userId;
 
+  Future<bool>? _loginFuture;
+
   EmbyClient({
     required super.baseUrl,
     required super.username,
@@ -60,6 +62,8 @@ class EmbyClient extends StreamClient {
     T? Function(Response response)? parser,
     String errorMessage = '',
     bool showRealError = false,
+    bool ignoreMessage = false,
+    bool isRetry = false,
   }) async {
     try {
       if (accessToken == null && userId == null) {
@@ -82,6 +86,29 @@ class EmbyClient extends StreamClient {
 
       return null;
     } on DioException catch (e) {
+      // The token can be invalidated server-side (server restart / session
+      // expiry); re-authenticate once and retry before giving up.
+      if (e.response?.statusCode == 401 && !isRetry) {
+        accessToken = null;
+        userId = null;
+
+        if (await login()) {
+          return safeRequest(
+            request,
+            parser: parser,
+            errorMessage: errorMessage,
+            showRealError: showRealError,
+            ignoreMessage: ignoreMessage,
+            isRetry: true,
+          );
+        }
+
+        return null;
+      }
+
+      if (ignoreMessage) {
+        return null;
+      }
       logger.output(
         '\n[$runtimeType]\n[error]Dio: ${e.message} (${e.response?.statusCode}\n[data]${e.response?.data.toString()})',
       );
@@ -92,6 +119,9 @@ class EmbyClient extends StreamClient {
 
       return null;
     } catch (e) {
+      if (ignoreMessage) {
+        return null;
+      }
       logger.output('\n[$runtimeType]\n[error]$e');
 
       if (errorMessage.isNotEmpty) {
@@ -103,7 +133,26 @@ class EmbyClient extends StreamClient {
   }
 
   /// Perform login and save user info and default music library
+  ///
+  /// Startup fires many safeRequest calls at once (songs, covers, playlists);
+  /// they must share a single AuthenticateByName or the burst of concurrent
+  /// logins can get throttled into intermittent 401s (same as FeiniuClient).
   Future<bool> login() async {
+    if (accessToken != null) return true;
+
+    final pending = _loginFuture;
+    if (pending != null) return pending;
+
+    final future = _login();
+    _loginFuture = future;
+    try {
+      return await future;
+    } finally {
+      _loginFuture = null;
+    }
+  }
+
+  Future<bool> _login() async {
     try {
       final response = await dio.post(
         '/Users/AuthenticateByName',
@@ -395,6 +444,7 @@ class EmbyClient extends StreamClient {
         options: Options(responseType: ResponseType.bytes),
       ),
       parser: (res) => Uint8List.fromList(res.data as List<int>),
+      ignoreMessage: true,
     );
   }
 
