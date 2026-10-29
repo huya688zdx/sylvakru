@@ -153,13 +153,24 @@ Future<void> initAudioService() async {
     audioHandler.pause();
   });
 
+  // 只恢复确实由本应用因中断暂停的播放：中断期间用户手动暂停时，中断
+  // 结束不得强行 play；USB 独占不走系统 audio session 的常规焦点链路，
+  // begin/end 事件都不驱动它的暂停与恢复。
+  var interruptionPausedByUs = false;
   _session.interruptionEventStream.listen((event) {
     debugPrint(
       "audio session interruption begin=${event.begin}; usbExclusiveActive=${audioHandler._usbExclusiveActive}",
     );
-    if (event.begin && !audioHandler._usbExclusiveActive) {
-      audioHandler.pause();
-    } else {
+    if (event.begin) {
+      if (audioHandler._usbExclusiveActive) {
+        return;
+      }
+      if (isPlayingNotifier.value) {
+        interruptionPausedByUs = true;
+        audioHandler.pause();
+      }
+    } else if (interruptionPausedByUs) {
+      interruptionPausedByUs = false;
       audioHandler.play();
     }
   });
@@ -275,6 +286,11 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
           return;
         }
 
+        // 睡眠定时器"播完当前曲暂停"：iOS 由 _beginLoadGrace 的缓冲结束
+        // 时机处理（保证 widget 在暂停后更新）；其它平台 BackgroundTaskService
+        // 为 no-op、不安装该订阅，必须在这里直接恢复暂停。
+        final needPauseTmp = Platform.isIOS ? false : needPause;
+
         if (Loader.busy) {
           await pause();
           return;
@@ -284,6 +300,10 @@ class MyAudioHandler extends BaseAudioHandler with WidgetsBindingObserver {
           await load();
         } else {
           await skipToNext(); // automatically go to next song
+        }
+
+        if (needPauseTmp) {
+          await pause();
         }
       }
     });
